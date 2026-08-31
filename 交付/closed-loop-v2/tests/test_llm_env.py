@@ -1,4 +1,4 @@
-"""llm_env: providers must self-sufficiently set the claude CLI env
+"""llm_env: Claude providers must self-sufficiently set the CLI env
 (CLAUDE_CODE_GIT_BASH_PATH / ANTHROPIC_MODEL) without depending on
 run_mission.py process setup — but never override operator values."""
 
@@ -27,18 +27,14 @@ def test_ensure_llm_env_never_overrides_operator(monkeypatch):
     assert os.environ["ANTHROPIC_MODEL"] == "custom-model"
 
 
-def test_providers_wire_ensure_env(monkeypatch):
-    """All three CLI providers must call ensure_llm_env on construction."""
+def test_remaining_claude_providers_wire_ensure_env(monkeypatch):
+    """Auditor and Verifier still call ensure_llm_env during R1-1."""
     import os
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
     from loopcore.auditor import ClaudeCliAuditorProvider
     from loopcore.verifier import ClaudeCliVerifierProvider
-    from loopcore.planner_adapter import AOOrchestratorPlannerProvider
     ClaudeCliAuditorProvider()
     assert os.environ.get("ANTHROPIC_MODEL")
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
     ClaudeCliVerifierProvider()
-    assert os.environ.get("ANTHROPIC_MODEL")
-    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
-    AOOrchestratorPlannerProvider()
     assert os.environ.get("ANTHROPIC_MODEL")

@@ -60,7 +60,7 @@ bus:
 
 roles:
   planner:
-    model: claude            # 可选 claude / glm / kimi；禁止 codex
+    model: gpt-5.6-sol
   auditor:
     model: claude
   verifier:

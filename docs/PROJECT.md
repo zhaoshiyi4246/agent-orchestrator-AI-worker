@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 修正进行中（R0 已完成）
+- 状态：R1 修正进行中（R0、R1-1 已完成）
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -52,7 +52,7 @@ Integration Gate
 
 R0 必须用入口、import、调用关系和测试复核上述定位。未经证明，不删除任何历史来源目录。
 
-## 三、当前实现：R0 代码事实
+## 三、当前实现：R0/R1-1 代码事实
 
 ### 1. 当前主入口与控制路径
 
@@ -79,7 +79,7 @@ run_mission.py main()
 
 `MissionRuntime` 直接创建并注入：
 
-- `AOOrchestratorPlannerProvider`、`ClaudeCliAuditorProvider`、
+- `CodexCliPlannerProvider`、`ClaudeCliAuditorProvider`、
   `ClaudeCliVerifierProvider`；
 - `ActionExecutor`、`AOAdapter`、`event_observer.Observer`、
   `mission_gate.IntegrationGate`、`StateStore`；
@@ -91,20 +91,26 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
 
 ### 2. 当前角色的真实运行形态
 
-- Planner、Auditor、Verifier 都不是 AO Session。三者分别通过本机
-  `claude -p` 的 headless Provider 同步调用外部模型；类名
-  `AOOrchestratorPlannerProvider` 不代表它由 AO 孵化。当前三者仍通过
-  `ANTHROPIC_MODEL*` 选择模型，默认值仍为 `GLM-5.2`。
+- Planner、Auditor、Verifier 都不是 AO Session。R1-1 已将生产 Planner
+  迁移为 `CodexCliPlannerProvider`：它通过共享 `codex_cli.run_codex_json()`
+  边界，以 stdin、`--ephemeral`、`--sandbox read-only`、现有输出 schema
+  和 `--output-last-message` 调用 Codex CLI，默认模型为可配置的
+  `gpt-5.6-sol`。Auditor 与 Verifier 本轮尚未迁移，仍通过本机
+  `claude -p` 和 `llm_env` 调用旧 Provider。
 - Worker 由 `ActionExecutor` 调用 `ao.exe spawn --kind worker` 创建，并通过
   `ao send`、`ao session kill` 管理；当前 `worker_harness` 默认仍为
   `claude-code`，`worker.model` 默认仍为 `GLM-5.2`。
 - `AOAdapter` 通过 AO REST 读取 Project/Session/Conversation/activity，并可
   调用 approval resolve；`ActionExecutor` 承担 AO CLI 写操作。
-- `--dry-run` 会禁止 Worker 孵化、用户指令投递和 worktree 合并，但仍创建
-  真实 headless Planner/Auditor/Verifier Provider，并在拆解阶段调用 Planner；
-  因而当前 dry-run 不是完全离线模型路径。R0 实跑时，本机没有 Claude CLI，
-  Planner 两次拆解失败后 Mission 进入 `HUMAN`。这是待替换的旧 Provider
-  依赖证据，不是目标架构，也不构成安装 Claude 的待办。
+- `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
+  只创建生产 Codex Planner，输出结构化 MissionPlan 并直接退出。该路径不
+  创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、
+  Verifier、Worker、Gate 或 LoopBus，不连接 AO，也不修改用户项目。它仍会
+  发起一次真实模型调用，因此不是离线模式；离线覆盖由 mock 测试提供。
+
+共享 Codex runner 是后续 Auditor/Verifier 迁移的复用边界。它不持久化
+Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试；
+角色 Provider 继续负责一次重试和现有本地 validator 的 fail-closed 语义。
 
 ### 3. Store、Bus、投影和用户指令
 

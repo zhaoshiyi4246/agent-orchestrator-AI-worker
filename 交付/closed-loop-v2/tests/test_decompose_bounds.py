@@ -3,7 +3,7 @@ request (was "2..1", which made every LLM attempt fail schema validation
 and forced the mission into HUMAN with an empty error detail)."""
 import json
 
-from loopcore.planner_adapter import (AOOrchestratorPlannerProvider as P,
+from loopcore.planner_adapter import (CodexCliPlannerProvider as P,
                                       PROMPT_DIR)
 
 
