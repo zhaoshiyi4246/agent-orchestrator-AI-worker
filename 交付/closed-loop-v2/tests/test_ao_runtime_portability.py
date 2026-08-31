@@ -10,6 +10,7 @@ import pytest
 import run_mission
 from loopcore.action_executor import ActionExecutor
 from loopcore.ao_adapter import AOAdapter
+from loopcore.state_store import StateStore
 
 
 def test_resolve_ao_bin_prefers_clao_override(tmp_path):
@@ -126,6 +127,67 @@ def test_build_runtime_resolves_one_shared_ao_contract(monkeypatch, tmp_path):
     assert captured["ao_run_file"] == run_file
     assert run_mission.os.environ["AO_RUN_FILE"] == str(run_file)
     assert "AO_DATA_DIR" not in run_mission.os.environ
+
+
+def test_read_only_attach_skips_ao_but_normal_start_fails_fast(
+        monkeypatch, tmp_path):
+    from panel import server
+
+    mission_id = "M-ATTACH-PORTABLE"
+    mission = {
+        "mission_id": mission_id,
+        "project_id": "project",
+        "objective": "inspect stored state",
+        "allowed_paths": ["src/**"],
+        "forbidden_paths": [".git/**"],
+        "acceptance_criteria": [
+            {"id": "AC1", "description": "stored state is readable"}],
+        "gate_commands": [],
+    }
+    runtime_dir = tmp_path / "runtime" / mission_id
+    runtime_dir.mkdir(parents=True)
+    store = StateStore(str(runtime_dir / "state.db"))
+    store.record_mission(
+        mission_id, {"state": "MISSION_DONE", "mission": mission})
+    store.close()
+
+    cfg = run_mission.load_config()
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setattr(run_mission, "ROOT", tmp_path)
+    monkeypatch.setattr(run_mission, "load_config", lambda: cfg)
+    monkeypatch.setattr(run_mission.shutil, "which", lambda _name: None)
+    monkeypatch.delenv("CLAO_AO_BIN", raising=False)
+    monkeypatch.delenv("AO_RUN_FILE", raising=False)
+    panel = server.PanelState()
+    monkeypatch.setattr(server, "PANEL", panel)
+
+    def forbidden_external_call(*_args, **_kwargs):
+        raise AssertionError("read-only attach attempted an external AO call")
+
+    monkeypatch.setattr(run_mission.AOAdapter, "_get", forbidden_external_call)
+    monkeypatch.setattr(
+        run_mission.ActionExecutor, "_run", forbidden_external_call)
+    monkeypatch.setattr(
+        "loopcore.planner_adapter.run_codex_json", forbidden_external_call)
+    monkeypatch.setattr(
+        "loopcore.auditor.run_codex_json", forbidden_external_call)
+    monkeypatch.setattr(
+        "loopcore.verifier.run_codex_json", forbidden_external_call)
+
+    attached = server.Handler._attach(
+        object(), {"mission_id": mission_id})
+    assert attached == {
+        "ok": True, "mission_id": mission_id, "attached": True}
+    assert panel.rt.mission.mission_id == mission_id
+    assert panel.rt.executor.ao_bin == "ao-unavailable-read-only"
+    assert panel.rt.store._conn.execute(
+        "SELECT COUNT(*) FROM missions").fetchone()[0] == 1
+    panel.rt.close()
+
+    normal_panel = server.PanelState()
+    monkeypatch.setattr(server, "PANEL", normal_panel)
+    with pytest.raises(RuntimeError, match="CLAO_AO_BIN"):
+        normal_panel.start_mission(mission)
 
 
 def test_auto_ff_requires_explicit_legacy_data_root(monkeypatch):

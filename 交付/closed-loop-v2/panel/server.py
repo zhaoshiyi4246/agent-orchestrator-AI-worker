@@ -576,7 +576,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise RuntimeError("任务运行中，先停止再查看其它存档")
             run_mission.setup_environment()
             cfg = run_mission.load_config()
-            PANEL.rt = run_mission.build_runtime(mission, cfg, dry_run=True)
+            PANEL.rt = run_mission.build_runtime(
+                mission, cfg, dry_run=True, require_ao=False)
             PANEL.last_summary = None
             PANEL.started_mono = None
         return {"ok": True, "mission_id": mid, "attached": True}

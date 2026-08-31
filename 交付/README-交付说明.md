@@ -70,6 +70,21 @@ closed-loop-demo-origin.git/  演示 bare origin
 
 R2 完成调用关系证明前，不删除历史来源目录或旧兼容模块。
 
+## AO 运行时与用户交付边界
+
+R2-0 已从当前生产主路径移除开发者绝对 AO 路径。AO Desktop 是外部依赖，不随
+本源码目录打包、安装或自动启动：
+
+- executable：`CLAO_AO_BIN` → PATH 中的 `ao`；
+- runfile：`CLAO_AO_RUN_FILE` → `~/.ao/running.json`；
+- 正常 Mission 启动/恢复必须能够解析 AO executable，否则 fail fast；
+- Panel 只读查看已有 Mission 存档不要求 AO executable，也不连接 AO、调用
+  Codex 或创建 Worker。
+
+上述结论只表示“运行时路径可移植”，不表示“任意用户零配置安装”。clean clone
+bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完成；当前交付不能
+宣称为通用安装包或解压即用产品。
+
 ## 当前已实现与后续事项
 
 当前已实现：
@@ -85,18 +100,26 @@ R2 完成调用关系证明前，不删除历史来源目录或旧兼容模块�
 
 仍待后续：
 
-- R2 的重复模块和旧入口清理；
-- R3 的默认单 Worker、按需第二 Worker 和 Verifier 调用策略；
-- R4 的任意 AO Project 选择、配置接线和自动审批权限；
-- R5 的 AO 路径/安装可移植性、CI 和干净交付。
+- PR #6 合并后先运行一次完整真实 E2E Mission；
+- 随后优先做 Competition behavior convergence：默认 1 个 Worker、按需最多
+  2 个，Verifier 默认 final/终局调用，并隐藏或显式标记
+  `auto_ff_master` 为实验性高风险功能；
+- 比赛行为收敛后再做重复模块和旧入口清理；
+- 最后完成 clean delivery、installer/bootstrap、AO first-run 和 CI 收尾；
+- fingerprint/source 与 thread revision 继续保持低优先级。
 
-AO Desktop 不随源码目录作为一个安装包交付。当前环境仍含本机 AO 路径假设，
-不能宣称任意电脑解压即可运行。
+Project 注册/选择与其他首次配置 UX 归比赛 UX/R4，`auto_ff_master` 的 legacy
+data root 和权限边界归 Competition convergence/R4，clean clone 安装归最终
+clean-delivery 阶段。
 
 ## 本地验证
 
 已验证基线使用 Python 3.12、本地 `.venv`、独立安装并运行的 AO Desktop，
 以及已通过 ChatGPT 登录的 Codex CLI。
+
+真实 Mission 启动前必须先安装并运行 AO Desktop。若 PATH 已有 `ao`，无需设置
+executable；否则在当前进程设置 `CLAO_AO_BIN`。非标准 daemon runfile 才需要
+设置 `CLAO_AO_RUN_FILE`，默认读取 `~/.ao/running.json`。
 
 ```powershell
 cd closed-loop-v2
@@ -113,7 +136,7 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 不创建 Worker、不创建 StateStore 或 runtime。真实运行还需要 AO daemon 在线，
 且目标 Project 已在 AO 注册。
 
-当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。
+测试数量以 CI 或当前真实命令输出为准，不在交付说明中冻结。
 
 ## 不作为源码交付的内容
 
