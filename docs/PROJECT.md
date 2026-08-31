@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 已完成；当前阶段为 R2，下一步 R2-1
+- 状态：R1 已完成；R2-0 已解除 AO 主运行路径可移植性 blocker；下一步先做完整真实 E2E Mission smoke
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -78,6 +78,12 @@ run_mission.py main()
 `loopcore.mission_cli` 仍可作为旧的监督、单任务和 Mission 兼容入口运行，
 但不被面板或 `run_mission.py` 导入。
 
+R2-0 后，Panel 与 CLI 继续复用同一个 `build_runtime()`，并共享同一份 AO
+运行时解析结果。AO Desktop 是外部依赖：CL-AO 不携带、不安装也不自动启动
+`ao-app` 或 `ao-data`。AO executable 依次由 `CLAO_AO_BIN`、PATH 中的 `ao`
+解析；daemon runfile 依次由 `CLAO_AO_RUN_FILE`、`~/.ao/running.json` 解析。
+任何开发机绝对路径都不属于产品契约。
+
 `MissionRuntime` 直接创建并注入：
 
 - `CodexCliPlannerProvider`、`CodexCliAuditorProvider`、
@@ -119,7 +125,10 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   均使用 `codex`；Panel 不硬编码 Worker model，`config/default.yaml` 的
   `worker.model=gpt-5.6-sol` 由 `run_mission.py` 注入 `ActionExecutor`。
 - `AOAdapter` 通过 AO REST 读取 Project/Session/Conversation/activity，并可
-  调用 approval resolve；`ActionExecutor` 承担 AO CLI 写操作。
+  调用 approval resolve；有效 runfile 中的动态端口优先于 `ao.base_url`，后者
+  再回退到 `http://127.0.0.1:3001`，`ao.request_timeout_seconds` 已接入请求
+  timeout。`ActionExecutor` 承担 AO CLI 写操作，使用调用方传入的 executable
+  和可选 runfile，不再无条件注入 `AO_DATA_DIR`。
 - `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
   只创建生产 Codex Planner，输出结构化 MissionPlan 并直接退出。该路径不
   创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、
@@ -192,6 +201,25 @@ panel /api/directive
 CL-AO 对应文件相同；v2 的 Mission、Store、Verifier、worktree 和多项 CLI
 则由 sidecar 来源继续演化。两套来源目录目前只作为同时交付的历史参考，
 R0 不据此删除或移动任何文件。
+
+### 5. R2-0 AO 外部运行时边界
+
+AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
+
+- executable：`CLAO_AO_BIN` → `shutil.which("ao")` → 清晰的 `RuntimeError`；
+- runfile：`CLAO_AO_RUN_FILE` → `Path.home() / ".ao" / "running.json"`；
+- endpoint：有效 runfile port → 显式 `ao.base_url` →
+  `http://127.0.0.1:3001`；
+- `ActionExecutor` 只在传入明确 runfile 时向 AO CLI 设置 `AO_RUN_FILE`，正常
+  生产组装不传入或注入开发者专属 `AO_DATA_DIR`；
+- 默认关闭的 `auto_ff_master` 仍属 R4 高风险边界；只有显式设置
+  `CLAO_AO_DATA_DIR` 才允许其解析 legacy integration worktree，否则明确拒绝；
+- `llm_env.py`、旧 AO Client/CLI 和依赖 `AO_DATA_DIR` 的测试夹具仍是 R2/R4
+  待审计兼容或历史边界，本轮未删除或改写。
+
+本轮 live probe 从默认 runfile 解析到 daemon endpoint，`get_projects()` 与
+`ao status --json` 均成功，且未创建 Worker。完整真实 Mission 尚未运行；下一步
+先完成该 E2E smoke，通过后再进入 R2-1。
 
 ## 四、后续收敛目标架构
 
@@ -433,8 +461,9 @@ UI → 绕过 MissionController 改状态
    每个 issue 一次 verdict，没有 revision 语义。
 6. Store/AO/投影的代码主从关系已确认；R1-4 已同步 README、交付说明、
    `ARCHITECTURE-v0.2.md` 和前端控制/证据流拓扑。
-7. `roles.*.model`、`roles.max_parallel_workers`、`ao.base_url` 等配置没有被
-   当前 `run_mission.py` 组装路径完整消费，面板还维护另一组运行时参数。
+7. `roles.*.model`、`roles.max_parallel_workers` 等配置仍未被当前组装路径完整
+   消费，面板还维护另一组运行时参数；AO 连接直接相关的 `ao.base_url` 与
+   `ao.request_timeout_seconds` 已在 R2-0 接入共享 `build_runtime()`。
 8. 面板默认且回退到 `closed-loop-demo`，没有从 AO 项目列表选择真实 Project。
 9. 自动审批存在；`auto_ff_master` 默认关闭，但面板 API 可开启自动快进和 push，
    两者都需要在 R4 单独审计权限边界。
@@ -445,7 +474,8 @@ UI → 绕过 MissionController 改状态
 
 - R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
-- R2：证明并收敛重复模块、旧入口和参考代码；
+- R2：R2-0 先修复 AO 主运行路径可移植性；完成真实 E2E smoke 后，再证明并
+  收敛重复模块、旧入口和参考代码；
 - R3：收敛 Worker、Verifier、issue/thread 与控制权语义；
 - R4：收敛配置、项目选择和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。

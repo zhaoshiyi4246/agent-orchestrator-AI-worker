@@ -42,6 +42,7 @@ fingerprint:
   max_length: 200
 
 ao:
+  # A valid ~/.ao/running.json port wins; this is the explicit fallback.
   base_url: "http://127.0.0.1:3001"
   request_timeout_seconds: 15
   sse_idle_timeout_seconds: 30

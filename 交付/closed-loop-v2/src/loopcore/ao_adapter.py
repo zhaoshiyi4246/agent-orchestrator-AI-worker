@@ -16,11 +16,17 @@ Known AO quirks handled here (and ONLY here):
 from __future__ import annotations
 
 import json
+import os
 import socket
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional
+
+
+DEFAULT_AO_BASE_URL = "http://127.0.0.1:3001"
+
 
 class UnsupportedOperation(NotImplementedError):
     """Raised for AO features the daemon does not expose."""
@@ -93,49 +99,49 @@ def loads_relaxed(raw: str):
         raise AOError("malformed AO JSON after repair: %s" % e) from e
 
 
-def _port_from_run_file() -> Optional[str]:
-    """Read the daemon port from AO_RUN_FILE (env) or AO_DATA_DIR/ao.run."""
-    import os
-    run_file = os.environ.get("AO_RUN_FILE")
-    if not run_file:
-        data_dir = os.environ.get("AO_DATA_DIR")
-        if data_dir:
-            run_file = os.path.join(data_dir, "ao.run")
-    if not run_file:
-        return None
+def _port_from_run_file(run_file=None) -> Optional[str]:
+    """Read AO's daemon port from an explicit or standard runfile."""
+    if run_file is None:
+        run_file = os.environ.get("AO_RUN_FILE") or (
+            Path.home() / ".ao" / "running.json")
     try:
-        with open(run_file, encoding="utf-8") as f:
-            text = f.read()
+        text = Path(run_file).read_text(encoding="utf-8")
     except Exception:
         return None
-    # ao.run is JSON; parse it properly first (the line scan below would
+    # The runfile is JSON; parse it properly first (the line scan below would
     # read the PID as the port on a compact single-line file).
     try:
         data = json.loads(text)
         port = data.get("port")
-        if port:
-            return str(int(port))
+        value = int(port)
+        if 1 <= value <= 65535:
+            return str(value)
     except Exception:
         pass
     for line in text.splitlines():
         if "port" in line and ":" in line:
             raw = line.split(":", 1)[1].strip()
             digits = "".join(ch for ch in raw if ch.isdigit())
-            return digits or None
+            try:
+                value = int(digits)
+                return str(value) if 1 <= value <= 65535 else None
+            except (TypeError, ValueError):
+                return None
     return None
 
 
 class AOAdapter:
     """Read-only client for the AO daemon REST + SSE interface."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:3001",
-                 timeout: float = 15.0):
-        if base_url == "http://127.0.0.1:3001":
-            # The daemon picks a dynamic port recorded in AO_RUN_FILE; prefer it.
-            derived = _port_from_run_file()
-            if derived:
-                base_url = "http://127.0.0.1:%s" % derived
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str = DEFAULT_AO_BASE_URL,
+                 timeout: float = 15.0, run_file=None):
+        # The daemon picks a dynamic port recorded in its runfile.  A valid
+        # runfile wins over the configured endpoint; configuration then acts
+        # as the explicit fallback before the stable localhost default.
+        derived = _port_from_run_file(run_file)
+        endpoint = ("http://127.0.0.1:%s" % derived) if derived else (
+            base_url or DEFAULT_AO_BASE_URL)
+        self.base_url = endpoint.rstrip("/")
         self.timeout = timeout
 
     # ------------------------------------------------------------------ REST

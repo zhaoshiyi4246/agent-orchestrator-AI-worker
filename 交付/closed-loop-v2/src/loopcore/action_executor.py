@@ -60,7 +60,8 @@ def _is_transient_spawn_error(text: str) -> bool:
 
 
 class ActionExecutor:
-    def __init__(self, ao_bin: str, data_dir: str, run_file: str,
+    def __init__(self, ao_bin: str, data_dir: Optional[str],
+                 run_file: Optional[str],
                  store: StateStore, worker_model: str = "",
                  max_spawn_attempts: int = 3,
                  spawn_backoff_seconds: int = 30,
@@ -68,7 +69,7 @@ class ActionExecutor:
                  transient_spawn_backoff_seconds: int = 90):
         self.ao_bin = ao_bin
         self.data_dir = data_dir
-        self.run_file = run_file
+        self.run_file = str(run_file) if run_file else None
         self.store = store
         # `ao spawn --model <m>`; empty deliberately selects the daemon
         # default. Production config pins gpt-5.6-sol for the Codex worker.
@@ -139,8 +140,8 @@ class ActionExecutor:
 
     def _env(self) -> Dict[str, str]:
         e = dict(os.environ)
-        e["AO_DATA_DIR"] = self.data_dir
-        e["AO_RUN_FILE"] = self.run_file
+        if self.run_file:
+            e["AO_RUN_FILE"] = self.run_file
         return e
 
     def _run(self, args: list, timeout: float = 120) -> subprocess.CompletedProcess:

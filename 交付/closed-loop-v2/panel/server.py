@@ -210,7 +210,12 @@ def ff_master_to_integration(mission_id: str, project_id: str) -> dict:
     main checkout is not on master/main, or when tracked files are dirty.
     Only ever fires after final gate + mission Verifier PASS (MISSION_DONE).
     """
-    wt = Path(run_mission.AO_DATA_DIR) / "worktrees" / project_id / \
+    data_dir = os.environ.get("CLAO_AO_DATA_DIR", "").strip()
+    if not data_dir:
+        raise RuntimeError(
+            "auto_ff_master requires explicit CLAO_AO_DATA_DIR; "
+            "the normal Mission runtime does not assume AO worktree storage")
+    wt = Path(data_dir) / "worktrees" / project_id / \
         ("integration-" + mission_id)
     if not wt.exists():
         raise RuntimeError("集成 worktree 不存在: %s" % wt.name)

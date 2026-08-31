@@ -260,6 +260,9 @@ def test_decompose_retries_once_then_succeeds(monkeypatch):
 
 def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
                                                           tmp_path):
+    adapter_calls = []
+    executor_calls = []
+
     class DummyStore:
         def __init__(self, path):
             self.path = path
@@ -284,21 +287,40 @@ def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
             self.projected = []
             self.errors = []
 
+    class DummyAdapter:
+        def __init__(self, **kwargs):
+            adapter_calls.append(kwargs)
+            self.base_url = kwargs["base_url"]
+
+    def dummy_executor(**kwargs):
+        executor_calls.append(kwargs)
+        return object()
+
     monkeypatch.setattr(run_mission, "ROOT", tmp_path)
+    monkeypatch.setattr(run_mission, "resolve_ao_bin",
+                        lambda: str(tmp_path / "ao.exe"))
+    monkeypatch.setattr(run_mission, "resolve_ao_run_file",
+                        lambda: tmp_path / "running.json")
     monkeypatch.setattr(run_mission, "StateStore", DummyStore)
-    monkeypatch.setattr(run_mission, "AOAdapter", lambda: object())
-    monkeypatch.setattr(run_mission, "ActionExecutor", lambda **kwargs: object())
+    monkeypatch.setattr(run_mission, "AOAdapter", DummyAdapter)
+    monkeypatch.setattr(run_mission, "ActionExecutor", dummy_executor)
     monkeypatch.setattr(run_mission, "IntegrationGate", lambda store: object())
     monkeypatch.setattr(run_mission, "MissionController", DummyController)
     monkeypatch.setattr(run_mission, "LoopBus", lambda config: object())
     monkeypatch.setattr(run_mission, "ProjectMemory", DummyMemory)
     monkeypatch.setattr(run_mission, "StoreBusProjector", DummyProjector)
 
-    cfg = {"roles": {
-        "planner": {"model": "planner-model"},
-        "auditor": {"model": "auditor-model"},
-        "verifier": {"model": "verifier-model"},
-    }}
+    cfg = {
+        "ao": {
+            "base_url": "http://127.0.0.1:4111",
+            "request_timeout_seconds": 7,
+        },
+        "roles": {
+            "planner": {"model": "planner-model"},
+            "auditor": {"model": "auditor-model"},
+            "verifier": {"model": "verifier-model"},
+        },
+    }
     runtime = run_mission.build_runtime(MISSION, cfg)
 
     assert isinstance(runtime._planner, CodexCliPlannerProvider)
@@ -310,6 +332,16 @@ def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
     assert runtime.controller.planner is runtime._planner
     assert runtime.controller.auditor is runtime._auditor
     assert runtime.controller.verifier is runtime._verifier
+    assert runtime.ao_bin == str(tmp_path / "ao.exe")
+    assert runtime.ao_run_file == str(tmp_path / "running.json")
+    assert adapter_calls[0] == {
+        "base_url": "http://127.0.0.1:4111",
+        "timeout": 7.0,
+        "run_file": tmp_path / "running.json",
+    }
+    assert executor_calls[0]["ao_bin"] == str(tmp_path / "ao.exe")
+    assert executor_calls[0]["data_dir"] is None
+    assert executor_calls[0]["run_file"] == str(tmp_path / "running.json")
 
     fallback = run_mission.build_runtime(MISSION, {})
     assert fallback._planner.model == "gpt-5.6-sol"
