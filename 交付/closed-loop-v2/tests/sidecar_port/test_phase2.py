@@ -89,10 +89,9 @@ def test_planner_replan_exhausted_to_human():
 
 
 def test_invalid_planner_output_to_human():
-    """AOOrchestratorPlannerProvider returning invalid JSON twice -> HUMAN."""
-    from loopcore.planner_adapter import AOOrchestratorPlannerProvider
-    prov = AOOrchestratorPlannerProvider(
-        ao_bin="fake", project_id="p", data_dir="d", run_file="r")
+    """CodexCliPlannerProvider returning invalid JSON twice -> HUMAN."""
+    from loopcore.planner_adapter import CodexCliPlannerProvider
+    prov = CodexCliPlannerProvider(codex_bin="fake")
     # force _call to return an invalid object twice
     prov._call = MagicMock(side_effect=lambda *a, **k: {"action": "Bogus"})
     audit = AuditResult("A4", "T1", AuditDecision.LOCAL_FIX,

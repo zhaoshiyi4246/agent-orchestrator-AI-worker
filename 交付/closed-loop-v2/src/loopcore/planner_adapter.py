@@ -2,9 +2,8 @@
 
 Providers:
   FakePlannerProvider              - deterministic, for unit tests.
-  AOOrchestratorPlannerProvider    - real planner via Claude CLI headless
-                                     (GLM-5.2), reading the system prompt and
-                                     emitting a validated PlannerAction.
+  CodexCliPlannerProvider          - production planner via the shared Codex
+                                     CLI structured-output boundary.
 
 The Planner is a planning agent (no code editing): it maps an AuditResult to a
 PlannerAction (CONTINUE/SEND_LOCAL_FIX/REPLAN_SPAWN/CANDIDATE_DONE/HUMAN).
@@ -14,18 +13,16 @@ On two invalid outputs -> HUMAN. Never substitutes FakePlanner for a real run.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Optional
 
-from .llm_env import run_claude
-
+from .codex_cli import run_codex_json
 from .mission_contracts import (AuditResult, PlannerAction, PlannerActionType,
                         AuditDecision, validate_planner_action)
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+SCHEMA_DIR = PROMPT_DIR.parent / "schemas"
 
 
 class PlannerProvider:
@@ -94,52 +91,10 @@ class FakePlannerProvider(PlannerProvider):
                            strategy="fake decompose")
 
 
-def _resolve_exe(bin_name: str) -> str:
-    if os.name != "nt":
-        return bin_name
-    if Path(bin_name).exists():
-        return bin_name
-    import shutil
-    resolved = shutil.which(bin_name)
-    if resolved:
-        return resolved
-    npm_dir = Path.home() / "AppData" / "Roaming" / "npm"
-    for cand in (npm_dir / (bin_name + ".cmd"), npm_dir / bin_name):
-        if cand.exists():
-            return str(cand)
-    return bin_name
-
-
-def _strip_fences(text: str) -> str:
-    t = (text or "").strip()
-    if t.startswith("```"):
-        t = t.split("\n", 1)[1] if "\n" in t else t[3:]
-    if t.endswith("```"):
-        t = t[:-3]
-    return t.strip()
-
-
-def _extract_json(text: str):
-    import re
-    m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S)
-    if m:
-        try:
-            return json.loads(m.group(1))
-        except ValueError:
-            pass
-    m = re.search(r"\{.*\}", text, re.S)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except ValueError:
-            return None
-    return None
-
-
 def _coerce_planner_strings(obj: dict) -> None:
     """Normalize common real-model output quirks before schema validation.
 
-    Live planners (GLM via claude -p) frequently emit `"message": null` or
+    Live planners can emit `"message": null` or
     omit `plan` when the action needs no message; the schema declares those
     as plain strings, so validation failed and a healthy PASS decision was
     degraded to the HUMAN fallback. Coerce None -> "" (and drop non-scalar
@@ -153,105 +108,58 @@ def _coerce_planner_strings(obj: dict) -> None:
             obj[key] = json.dumps(v, ensure_ascii=False)
 
 
-class AOOrchestratorPlannerProvider(PlannerProvider):
-    """Real Planner via Claude CLI headless (GLM-5.2), no tools.
+class CodexCliPlannerProvider(PlannerProvider):
+    """Production Planner using ephemeral, read-only Codex CLI calls."""
 
-    Uses `claude -p --system-prompt-file <planner.md> --output-format json
-    --json-schema <planner-action> --disallowedTools "*" --max-budget-usd N`.
-    The AuditResult + TaskSpec go via STDIN. The assistant must emit a
-    PlannerAction JSON object.
-
-    This deliberately does NOT use `ao spawn --kind orchestrator`: that path
-    inherits the AO daemon's environment (ANTHROPIC_MODEL etc.), which can
-    point at a model the team is not allowed to access (403). Calling the CLI
-    directly lets us override ANTHROPIC_MODEL to a known-working value, the
-    same way the Auditor does.
-    """
-    def __init__(self, ao_bin: str = "", project_id: str = "",
-                 data_dir: str = "", run_file: str = "",
-                 claude_bin: str = "claude",
-                 budget_usd: float = 0.20, timeout: int = 180,
-                 model: Optional[str] = None):
-        # ao_bin/data_dir/run_file kept for backward CLI compatibility but
-        # are not used by the direct-CLI planner.
-        from .llm_env import ensure_llm_env
-        ensure_llm_env()
-        self.ao_bin = ao_bin
-        self.project_id = project_id
-        self.data_dir = data_dir
-        self.run_file = run_file
-        self.bin = _resolve_exe(claude_bin)
-        self.budget = budget_usd
+    def __init__(self, *, codex_bin: str = "codex", timeout: int = 180,
+                 model: Optional[str] = None, cwd: Optional[Path] = None,
+                 **legacy_options):
+        # The alias below keeps older compatibility CLIs importable. Their AO
+        # connection arguments never belonged to the headless Planner and are
+        # intentionally ignored; no Claude implementation remains here.
+        unknown = set(legacy_options) - {
+            "ao_bin", "project_id", "data_dir", "run_file",
+        }
+        if unknown:
+            raise TypeError("unexpected Planner options: %s"
+                            % ", ".join(sorted(unknown)))
+        self.codex_bin = codex_bin
         self.timeout = timeout
-        self.model = model or os.environ.get("ANTHROPIC_MODEL_PLANNER",
-                                              "GLM-5.2")
-        with open(PROMPT_DIR / "planner.md", encoding="utf-8") as f:
-            self.system_prompt = f.read()
-        with open(PROMPT_DIR.parent / "schemas" / "planner-action.schema.json",
-                  encoding="utf-8") as f:
-            self.schema = json.load(f)
-        self._sp_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8")
-        self._sp_file.write(self.system_prompt)
-        self._sp_file.flush()
-        self._sp_path = self._sp_file.name
+        self.model = model or "gpt-5.6-sol"
+        self.cwd = Path(cwd) if cwd is not None else PROMPT_DIR.parent
+        self.system_prompt = (PROMPT_DIR / "planner.md").read_text("utf-8")
+        self.decompose_prompt = (PROMPT_DIR / "planner-decompose.md").read_text(
+            "utf-8")
+        self.action_schema_path = SCHEMA_DIR / "planner-action.schema.json"
+        self.mission_schema_path = SCHEMA_DIR / "mission-plan.schema.json"
 
-    def close(self) -> None:
-        """Remove the on-disk system-prompt temp files created at construction.
-        Idempotent — safe to call from a finally/atexit path."""
-        import os as _os
-        for attr in ("_sp_path", "_dsp"):
-            p = self.__dict__.get(attr)
-            if p:
-                try:
-                    _os.unlink(p)
-                except OSError:
-                    pass
-                self.__dict__[attr] = None
-
-    def _env(self) -> dict:
-        e = dict(os.environ)
-        e["ANTHROPIC_MODEL"] = self.model
-        return e
+    def _run(self, prompt: str, schema_path: Path) -> dict:
+        return run_codex_json(
+            prompt=prompt,
+            schema_path=schema_path,
+            model=self.model,
+            timeout=self.timeout,
+            codex_bin=self.codex_bin,
+            cwd=self.cwd,
+        )
 
     def _call(self, audit: AuditResult, task_spec_dict: dict, action_id: str,
               *, target_session_id: Optional[str], remaining_replans: int,
-              instruct: str = "", board: Optional[dict] = None,
-              use_schema: bool = True) -> dict:
-        prompt = json.dumps({
-            "action_id": action_id, "task_id": audit.task_id,
+              instruct: str = "", board: Optional[dict] = None) -> dict:
+        task_input = json.dumps({
+            "action_id": action_id,
+            "task_id": audit.task_id,
             "audit_result": audit.to_dict(),
             "task_spec": task_spec_dict,
             "target_session_id": target_session_id,
             "remaining_replans": remaining_replans,
             "user_instruction": instruct or "",
-            "mission_board": (board or None),
+            "mission_board": board or None,
             "instruction": ("Output ONLY a PlannerAction JSON object matching "
                             "the schema, with action_id=%s." % action_id),
         }, ensure_ascii=False, indent=2)
-        cmd = [self.bin, "-p",
-               "--system-prompt-file", self._sp_path,
-               "--output-format", "json",
-               "--disallowedTools", "*",
-               "--max-budget-usd", str(self.budget)]
-        if use_schema:
-            cmd += ["--json-schema", json.dumps(self.schema)]
-        proc = run_claude(cmd, input=prompt, timeout=self.timeout,
-                          encoding="utf-8", errors="replace", env=self._env())
-        out = (proc.stdout or "").strip()
-        if not out:
-            raise RuntimeError("claude empty stdout rc=%s stderr=%s"
-                               % (proc.returncode, (proc.stderr or "")[:300]))
-        wrapper = json.loads(out)
-        if isinstance(wrapper, dict) and wrapper.get("is_error"):
-            raise RuntimeError("claude error subtype=%s"
-                               % wrapper.get("subtype"))
-        if isinstance(wrapper, dict) and "result" in wrapper:
-            inner = wrapper["result"]
-            if isinstance(inner, str):
-                inner = _extract_json(inner) or json.loads(_strip_fences(inner))
-            return inner
-        return wrapper
+        prompt = "%s\n\n# Task input\n%s" % (self.system_prompt, task_input)
+        return self._run(prompt, self.action_schema_path)
 
     def plan(self, audit: AuditResult, task_spec_dict: dict,
              action_id: str, *, target_session_id: Optional[str] = None,
@@ -259,14 +167,13 @@ class AOOrchestratorPlannerProvider(PlannerProvider):
              instruct: str = "",
              board: Optional[dict] = None) -> PlannerAction:
         last_err = ""
-        for attempt, use_schema in ((0, True), (1, False)):
+        for attempt in range(2):
             try:
                 obj = self._call(audit, task_spec_dict, action_id,
                                  target_session_id=target_session_id,
                                  remaining_replans=remaining_replans,
                                  instruct=instruct,
-                                 board=board,
-                                 use_schema=use_schema)
+                                 board=board)
                 obj.setdefault("action_id", action_id)
                 obj.setdefault("task_id", audit.task_id)
                 _coerce_planner_strings(obj)
@@ -289,18 +196,20 @@ class AOOrchestratorPlannerProvider(PlannerProvider):
 
         A separate call from per-cycle plan(): different output shape (a
         MissionPlan with subtasks, not a single action). Schema-validated
-        against mission-plan; two attempts; both fail -> empty MissionPlan
-        (the controller halts to HUMAN — no runaway decomposition).
+        against mission-plan; two attempts; both fail -> RuntimeError (the
+        controller's existing boundary halts to HUMAN).
         """
         from .mission_contracts import MissionPlan
         max_sub = max(1, int((mission.get("budgets") or {})
                              .get("max_subtasks", 5) or 5))
         last_err = ""
-        for attempt, use_schema in ((0, True), (1, False)):
+        for attempt in range(2):
             try:
-                obj = self._call_decompose(mission, plan_id, max_sub,
-                                           use_schema=use_schema)
+                obj = self._call_decompose(mission, plan_id, max_sub)
                 ok, msg = self._validate_mission_plan(obj, max_sub)
+                if ok and obj.get("mission_id") != mission.get("mission_id"):
+                    ok = False
+                    msg = "mission_id does not match the input mission"
                 if ok:
                     return MissionPlan.from_dict(obj)
                 last_err = "schema: %s" % msg
@@ -329,55 +238,17 @@ class AOOrchestratorPlannerProvider(PlannerProvider):
                 "there; the system runs the full gate on the merged tree "
                 "at the end).")
 
-    def _call_decompose(self, mission: dict, plan_id: str, max_sub: int,
-                        use_schema: bool = True) -> dict:
-        with open(PROMPT_DIR.parent / "schemas" / "mission-plan.schema.json",
-                  encoding="utf-8") as f:
-            mschema = json.load(f)
-        prompt = json.dumps({
+    def _call_decompose(self, mission: dict, plan_id: str,
+                        max_sub: int) -> dict:
+        task_input = json.dumps({
             "mission": mission,
             "plan_id": plan_id,
             "max_subtasks": max_sub,
             "instruction": self._decompose_instruction(max_sub),
         }, ensure_ascii=False, indent=2)
-        cmd = [self.bin, "-p",
-               "--system-prompt-file",
-               self._decompose_sp_path(),
-               "--output-format", "json",
-               "--disallowedTools", "*",
-               "--max-budget-usd", str(self.budget)]
-        if use_schema:
-            cmd += ["--json-schema", json.dumps(mschema)]
-        proc = run_claude(cmd, input=prompt, timeout=self.timeout,
-                          encoding="utf-8", errors="replace", env=self._env())
-        out = (proc.stdout or "").strip()
-        if not out:
-            raise RuntimeError("claude empty stdout rc=%s stderr=%s"
-                               % (proc.returncode, (proc.stderr or "")[:300]))
-        wrapper = json.loads(out)
-        if isinstance(wrapper, dict) and wrapper.get("is_error"):
-            raise RuntimeError("claude error subtype=%s"
-                               % wrapper.get("subtype"))
-        if isinstance(wrapper, dict) and "result" in wrapper:
-            inner = wrapper["result"]
-            if isinstance(inner, str):
-                inner = _extract_json(inner) or json.loads(
-                    _strip_fences(inner))
-            return inner
-        return wrapper
-
-    def _decompose_sp_path(self) -> str:
-        if self.__dict__.get("_dsp"):
-            return self._dsp
-        import tempfile
-        with open(PROMPT_DIR / "planner-decompose.md", encoding="utf-8") as f:
-            sp = f.read()
-        tf = tempfile.NamedTemporaryFile(mode="w", suffix=".md",
-                                         delete=False, encoding="utf-8")
-        tf.write(sp)
-        tf.flush()
-        self._dsp = tf.name
-        return self._dsp
+        prompt = "%s\n\n# Mission input\n%s" % (
+            self.decompose_prompt, task_input)
+        return self._run(prompt, self.mission_schema_path)
 
     @staticmethod
     def _validate_mission_plan(obj: dict, max_sub: int):
@@ -407,3 +278,8 @@ class AOOrchestratorPlannerProvider(PlannerProvider):
         except Exception as e:  # noqa
             return False, "unparsable: %s" % e
         return True, ""
+
+
+# Compatibility for the legacy CLI modules that are outside this migration's
+# allowed edit scope.  There is only one production Planner implementation.
+AOOrchestratorPlannerProvider = CodexCliPlannerProvider

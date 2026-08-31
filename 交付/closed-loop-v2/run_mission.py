@@ -3,11 +3,12 @@
 
 Usage (from the closed-loop-v2 directory):
     PYTHONPATH=src .venv/Scripts/python.exe run_mission.py tasks/mission-quick.json
-    ... add --dry-run to exercise the pipeline without touching AO.
+    ... add --dry-run to preflight Planner decomposition without touching AO.
 
-Wires: config -> AO daemon -> MissionController (Planner/Auditor/Verifier via
-headless claude CLI, Workers via ao spawn) -> LoopBus projection ->
-memory.md / project.md -> FINAL_REPORT.
+Wires: config -> AO daemon -> MissionController (Planner via Codex CLI;
+Auditor/Verifier temporarily via Claude CLI; Workers temporarily created by
+the legacy AO harness) -> LoopBus projection -> memory.md / project.md ->
+FINAL_REPORT.
 
 The same wiring is importable (build_runtime / run_loop) so the web panel
 drives the EXACT code path this CLI validates — no second implementation.
@@ -36,7 +37,7 @@ from loopcore.memory import ProjectMemory                    # noqa: E402
 from loopcore.mission import MISSION_TERMINAL, MissionController  # noqa: E402
 from loopcore.mission_contracts import MissionSpec           # noqa: E402
 from loopcore.mission_gate import IntegrationGate            # noqa: E402
-from loopcore.planner_adapter import AOOrchestratorPlannerProvider  # noqa: E402
+from loopcore.planner_adapter import CodexCliPlannerProvider       # noqa: E402
 from loopcore.state_store import StateStore                  # noqa: E402
 from loopcore.verifier import ClaudeCliVerifierProvider      # noqa: E402
 
@@ -48,9 +49,9 @@ AO_RUN_FILE = str(Path(AO_DATA_DIR) / "ao.run")
 def setup_environment() -> None:
     """Process-level env every entry point needs (CLI, panel, scripts).
 
-    Provider-level CLAUDE_CODE_GIT_BASH_PATH / ANTHROPIC_MODEL defaults now
-    live in loopcore.llm_env (self-sufficient providers); what remains here
-    is AO daemon discovery and the venv-first PATH for the integration gate.
+    The remaining Claude Auditor/Verifier defaults live in loopcore.llm_env;
+    what remains here is AO daemon discovery and the venv-first PATH for the
+    integration gate. The Codex Planner does not use this environment setup.
     """
     os.environ.setdefault("AO_DATA_DIR", AO_DATA_DIR)
     os.environ.setdefault("AO_RUN_FILE", AO_RUN_FILE)
@@ -67,6 +68,21 @@ def setup_environment() -> None:
 def load_config() -> dict:
     return yaml.safe_load(
         (ROOT / "config" / "default.yaml").read_text("utf-8"))
+
+
+def build_planner(cfg: dict, *, timeout: int = 180,
+                  codex_bin: str = "codex",
+                  cwd: Path | None = None) -> CodexCliPlannerProvider:
+    """Build the one production Planner used by normal and dry-run paths."""
+    roles = cfg.get("roles") or {}
+    planner_cfg = roles.get("planner") or {}
+    model = planner_cfg.get("model") or "gpt-5.6-sol"
+    return CodexCliPlannerProvider(
+        model=model,
+        timeout=timeout,
+        codex_bin=codex_bin,
+        cwd=cwd or ROOT,
+    )
 
 
 class MissionRuntime:
@@ -92,8 +108,7 @@ class MissionRuntime:
             transient_spawn_backoff_seconds=int(
                 wcfg.get("spawn_transient_backoff_seconds", 90)))
         self.gate = IntegrationGate(self.store)
-        planner = AOOrchestratorPlannerProvider(
-            project_id=mission_dict["project_id"], timeout=120)
+        planner = build_planner(cfg, timeout=180, cwd=ROOT)
         auditor = ClaudeCliAuditorProvider(timeout=120)
         verifier = ClaudeCliVerifierProvider(timeout=120)
         # Keep references so close() can release their temp files; the panel
@@ -190,10 +205,72 @@ def main() -> int:
                     help="hard wall-clock cap for this runner (default 5 min)")
     args = ap.parse_args()
 
-    mission_dict = json.loads(Path(args.mission_json).read_text("utf-8"))
+    try:
+        mission_dict = json.loads(Path(args.mission_json).read_text("utf-8"))
+    except Exception as exc:
+        if args.dry_run:
+            print("planning dry-run error: invalid mission JSON: %s" % exc,
+                  file=sys.stderr)
+            return 2
+        raise
     cfg = load_config()
+
+    if args.dry_run:
+        try:
+            if not isinstance(mission_dict, dict):
+                raise ValueError("mission must be a JSON object")
+            for field in ("allowed_paths", "forbidden_paths",
+                          "acceptance_criteria", "gate_commands"):
+                if not isinstance(mission_dict.get(field), list):
+                    raise ValueError("%s must be a list" % field)
+            if not isinstance(mission_dict.get("budgets", {}), dict):
+                raise ValueError("budgets must be an object")
+            if not all(isinstance(path, str)
+                       for path in mission_dict["allowed_paths"]
+                       + mission_dict["forbidden_paths"]):
+                raise ValueError("mission paths must be strings")
+            if not all(isinstance(command, str)
+                       for command in mission_dict["gate_commands"]):
+                raise ValueError("gate_commands entries must be strings")
+            if not all(isinstance(item, dict) and item.get("id")
+                       and item.get("description")
+                       for item in mission_dict["acceptance_criteria"]):
+                raise ValueError(
+                    "acceptance criteria require id and description")
+            mission = MissionSpec.from_dict(mission_dict)
+            if not mission.mission_id or not mission.project_id \
+                    or not mission.objective:
+                raise ValueError(
+                    "mission_id, project_id, and objective are required")
+            if not mission.allowed_paths:
+                raise ValueError("allowed_paths must be non-empty")
+            if not mission.acceptance_criteria:
+                raise ValueError("acceptance_criteria must be non-empty")
+            max_subtasks = int(
+                (mission.budgets or {}).get("max_subtasks", 5) or 5)
+            if max_subtasks < 1:
+                raise ValueError("budgets.max_subtasks must be positive")
+            planner = build_planner(cfg, timeout=180, cwd=ROOT)
+            plan = planner.plan_decompose(
+                mission.to_dict(), "DECOMP-%s" % mission.mission_id)
+            summary = {
+                "mission_id": mission.mission_id,
+                "dry_run": True,
+                "planner_provider": type(planner).__name__,
+                "model": planner.model,
+                "subtask_count": len(plan.subtasks),
+                "plan": plan.to_dict(),
+            }
+            print(json.dumps(summary, ensure_ascii=False, indent=2),
+                  flush=True)
+            return 0
+        except Exception as exc:
+            detail = str(exc).replace("\r", " ").replace("\n", " ")[:400]
+            print("planning dry-run error: %s" % detail, file=sys.stderr)
+            return 2
+
     setup_environment()
-    rt = build_runtime(mission_dict, cfg, dry_run=args.dry_run)
+    rt = build_runtime(mission_dict, cfg, dry_run=False)
 
     print(f"[runner] mission={rt.mission.mission_id} "
           f"project={rt.mission.project_id} dry_run={args.dry_run} "

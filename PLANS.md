@@ -1,10 +1,10 @@
 # v0.2 修正计划
 
 - 当前阶段：R1 — Provider 迁移与架构事实统一
-- 当前任务：实现并验证 Codex CLI Provider，先迁移 Planner 并恢复 dry-run
-- 当前状态：进行中
-- 下一步：在独立代码任务中实现共享 Codex CLI 调用边界，先迁移 Planner，
-  保持现有 schema/validator 与 `MissionController` 控制边界
+- 当前任务：R1-1 — 迁移 Planner Provider 并恢复 planning dry-run
+- 当前状态：R1-1 已完成，R1 继续进行
+- 下一步：R1-2 — 在独立任务中迁移 Auditor 和 Verifier，复用已验证的
+  Codex CLI 调用边界
 
 ## 一、更新规则
 
@@ -72,7 +72,7 @@ R0 只做基线，不修改产品行为。
 | 当前唯一控制平面 | 当前代码主路径为 `MissionController`；`LoopBus` 不参与状态迁移或 Agent 指令投递 |
 | 当前状态源 | CL-AO Mission/Task/预算/恢复为 SQLite `StateStore`；AO Snapshot 提供 Worker 事实；Bus、Markdown、JSONL 是后置投影 |
 | 已确认重复模块 | `ao_adapter/ao_client`、`event_observer/observer`、`mission_gate/integration_gate`、`mission_contracts/protocol`、四套 CLI；详见 `docs/PROJECT.md` |
-| 初始化 PR | `#1`，状态 OPEN，目标分支 `main`，未合并 |
+| 初始化 PR | `#1`，已通过 rebase 合并到 `main` |
 
 R0 关闭结论：治理文件、主路径与重复模块盘点已建立；完整 pytest、compileall、
 Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run 失败已准确
@@ -86,7 +86,24 @@ Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run �
 
 不得为了通过 R0 修改产品代码。
 
-## 五、已知问题清单
+## 五、R1-1 验收证据
+
+| 项目 | 结果 |
+|---|---|
+| 共享调用边界 | 新增 `loopcore.codex_cli.run_codex_json()`；stdin 传入 prompt，使用 `codex exec --ephemeral --sandbox read-only --model ... --output-schema ... --output-last-message ... -`，只解析临时最终消息文件并要求 JSON object；无共享层重试 |
+| schema 兼容 | 保留并读取现有 PlannerAction/MissionPlan schema；runner 仅为 Codex structured output 派生调用期严格 transport 副本，调用结束清理；原 schema 与后续本地 validator 均未修改或绕过 |
+| 生产 Planner | `CodexCliPlannerProvider` 已替换 Claude 实现；默认模型 `gpt-5.6-sol`，由 `roles.planner.model` 覆盖；`plan()` 两次失败后返回 HUMAN，`plan_decompose()` 两次失败后抛出并由 Controller 边界转 HUMAN |
+| planning dry-run | `run_mission.py --dry-run` 只解析 Mission、创建 Codex Planner 并输出 MissionPlan；不组装 MissionRuntime/StateStore/AO/Worker/Auditor/Verifier/Gate/LoopBus |
+| 离线测试 | `pytest tests -q`：271 项全部通过；退出码 0 |
+| 语法与 diff | `compileall -q src panel run_mission.py` 与 `git diff --check` 均退出 0 |
+| live Planner | `codex-cli 0.150.1`、ChatGPT 登录、`gpt-5.6-sol`；`mission-quick.json --dry-run` 最终退出 0，mission_id 匹配，生成 2 个子任务（既有范围 2..2），输出通过 structured schema 与本地 validator |
+| live 副作用 | 未连接 AO、未创建 Worker、未创建或更新 runtime/state；既有 `runtime/MISSION-QUICK-001` 文件时间与 SHA-256 均保持不变 |
+
+R1-1 关闭结论：共享 Codex runner、生产 Planner 迁移和无 AO 副作用的
+planning dry-run 已通过离线与 live 验证。Auditor、Verifier 和 AO Worker 尚未
+迁移，进入 R1-2 及后续独立任务。
+
+## 六、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
 |---|---|---|---|
@@ -103,11 +120,12 @@ Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run �
 | K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
 | K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已确认：文档声称 247/272，本次实际收集 252 项 |
-| K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已确认：目标改为 Codex CLI + GPT-5.6 Sol |
-| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已确认：目标改为 AO Codex harness + GPT-5.6 Sol；具体 AO harness/model 参数必须通过本机 live probe 确认 |
-| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已确认：后续独立任务统一清理，不在 R0 修改 |
+| K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 部分解决：Planner 已迁移 Codex CLI；Auditor/Verifier 仍未迁移，列入 R1-2 |
+| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 未解决：具体 AO Codex harness/model 参数仍须在后续独立任务通过本机 live probe 确认 |
+| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 进行中：仅 `roles.planner.model` 已在 R1-1 更新；其余文档与 Auditor/Verifier/Worker 配置留待后续任务 |
+| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 已确认：R1-1 不扩 scope，计划在配置收敛与干净交付阶段处理 |
 
-## 六、阶段边界
+## 七、阶段边界
 
 ### R1
 
@@ -159,7 +177,9 @@ Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run �
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-## 七、停止条件
+R1-1 已完成；下一独立任务为 R1-2：迁移 Auditor 和 Verifier。
+
+## 八、停止条件
 
 出现以下任一情况立即停止当前任务并报告：
 
