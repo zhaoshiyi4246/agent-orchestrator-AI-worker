@@ -111,6 +111,9 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
 共享 Codex runner 是后续 Auditor/Verifier 迁移的复用边界。它不持久化
 Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试；
 角色 Provider 继续负责一次重试和现有本地 validator 的 fail-closed 语义。
+PlannerAction 的 transport schema 已显式覆盖 REPLAN 所需的非空
+`replacement_task_spec.objective`；共享 runner 不再把未声明 `properties` 的
+object schema 静默收窄为空对象，而是在启动 Codex 前 fail closed。
 
 ### 3. Store、Bus、投影和用户指令
 

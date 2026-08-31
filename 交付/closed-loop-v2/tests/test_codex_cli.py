@@ -66,6 +66,59 @@ def test_success_uses_safe_command_stdin_and_cleans_output(monkeypatch,
     assert not Path(seen["schema_path"]).exists()
 
 
+def test_planner_transport_schema_preserves_replan_objective(monkeypatch,
+                                                             tmp_path):
+    seen = {}
+    payload = {
+        "replacement_task_spec": {
+            "objective": "Use a corrected implementation route",
+        },
+    }
+
+    def fake_run(command, **kwargs):
+        schema_path = Path(
+            command[command.index("--output-schema") + 1])
+        seen["schema"] = json.loads(schema_path.read_text(encoding="utf-8"))
+        output_path = Path(
+            command[command.index("--output-last-message") + 1])
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    schema_path = (Path(__file__).resolve().parents[1] / "schemas" /
+                   "planner-action.schema.json")
+
+    result = run_codex_json(
+        "planner prompt", schema_path, codex_bin="codex-test-bin",
+        cwd=tmp_path)
+
+    replacement = seen["schema"]["properties"]["replacement_task_spec"]
+    assert replacement["properties"]["objective"] == {
+        "type": "string", "minLength": 1}
+    assert replacement["required"] == ["objective"]
+    assert replacement["additionalProperties"] is False
+    assert result == payload
+
+
+def test_object_schema_without_properties_fails_before_subprocess(
+        monkeypatch, tmp_path):
+    schema_path = tmp_path / "bad-schema.json"
+    schema_path.write_text('{"type":["object","null"]}', encoding="utf-8")
+    called = False
+
+    def fake_run(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("subprocess must not start")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(CodexCliError,
+                       match="object schema must declare properties"):
+        run_codex_json("prompt", schema_path,
+                       codex_bin="codex-test-bin")
+    assert called is False
+
+
 def test_nonzero_exit_raises_short_error_without_prompt(monkeypatch, tmp_path):
     seen = {}
 

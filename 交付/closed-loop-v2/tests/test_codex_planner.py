@@ -38,6 +38,14 @@ def _audit():
         [AuditEvidence("gate", "all checks passed")], "done", 0.99)
 
 
+def _replan_audit():
+    return AuditResult(
+        "AUD-REPLAN", "TASK-1", AuditDecision.REPLAN,
+        [AuditEvidence("failure", "the original route cannot succeed")],
+        "choose a corrected implementation route", 0.95,
+        failed_criteria=["AC-1"])
+
+
 def _action():
     return {
         "action_id": "ACT-1",
@@ -46,6 +54,19 @@ def _action():
         "reason": "audit passed",
         "message": "",
         "plan": "send to gate",
+    }
+
+
+def _replan_action(replacement):
+    return {
+        "action_id": "ACT-REPLAN",
+        "task_id": "TASK-1",
+        "action": "REPLAN_SPAWN",
+        "target_session_id": "worker-old",
+        "message": "",
+        "replacement_task_spec": replacement,
+        "reason": "the original route is blocked",
+        "plan": "spawn a replacement worker with the corrected route",
     }
 
 
@@ -125,6 +146,72 @@ def test_plan_retries_once_then_succeeds(monkeypatch):
     monkeypatch.setattr("loopcore.planner_adapter.time.sleep", lambda _: None)
     action = planner.plan(_audit(), {"task_id": "TASK-1"}, "ACT-1")
     assert action.action == PlannerActionType.CANDIDATE_DONE
+
+
+def test_replan_with_nonempty_replacement_objective_is_valid(monkeypatch):
+    planner = CodexCliPlannerProvider()
+    monkeypatch.setattr(
+        planner, "_call",
+        lambda *a, **k: _replan_action("unused") | {
+            "replacement_task_spec": {
+                "objective": "  Use a corrected implementation route  "}})
+
+    action = planner.plan(
+        _replan_audit(), {"task_id": "TASK-1"}, "ACT-REPLAN",
+        target_session_id="worker-old", remaining_replans=1)
+
+    assert action.action == PlannerActionType.REPLAN_SPAWN
+    assert action.replacement_task_spec == {
+        "objective": "Use a corrected implementation route"}
+    assert action.validate()[0]
+
+
+@pytest.mark.parametrize("invalid_replacement", [
+    None,
+    {},
+    {"objective": "   "},
+])
+def test_replan_invalid_replacement_retries_then_succeeds(
+        monkeypatch, invalid_replacement):
+    planner = CodexCliPlannerProvider()
+    outputs = iter([
+        _replan_action(invalid_replacement),
+        _replan_action({"objective": "Use the corrected route"}),
+    ])
+    calls = []
+
+    def fake_call(*args, **kwargs):
+        calls.append(1)
+        return next(outputs)
+
+    monkeypatch.setattr(planner, "_call", fake_call)
+    monkeypatch.setattr("loopcore.planner_adapter.time.sleep", lambda _: None)
+
+    action = planner.plan(
+        _replan_audit(), {"task_id": "TASK-1"}, "ACT-REPLAN",
+        target_session_id="worker-old", remaining_replans=1)
+
+    assert len(calls) == 2
+    assert action.action == PlannerActionType.REPLAN_SPAWN
+    assert action.replacement_task_spec["objective"] == \
+        "Use the corrected route"
+
+
+def test_replan_two_invalid_replacements_fail_closed_to_human(monkeypatch):
+    planner = CodexCliPlannerProvider()
+    outputs = iter([
+        _replan_action(None),
+        _replan_action({}),
+    ])
+    monkeypatch.setattr(planner, "_call", lambda *a, **k: next(outputs))
+    monkeypatch.setattr("loopcore.planner_adapter.time.sleep", lambda _: None)
+
+    action = planner.plan(
+        _replan_audit(), {"task_id": "TASK-1"}, "ACT-REPLAN",
+        target_session_id="worker-old", remaining_replans=1)
+
+    assert action.action == PlannerActionType.HUMAN
+    assert "replacement_task_spec.objective" in action.reason
 
 
 def test_plan_fails_closed_to_human_after_two_failures(monkeypatch):

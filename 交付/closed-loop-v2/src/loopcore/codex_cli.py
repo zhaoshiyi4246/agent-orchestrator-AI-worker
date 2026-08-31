@@ -55,10 +55,11 @@ def run_codex_json(
                 is_object = node_type == "object" or (
                     isinstance(node_type, list) and "object" in node_type)
                 if is_object:
-                    properties = node.get("properties")
-                    if not isinstance(properties, dict):
-                        properties = {}
-                        node["properties"] = properties
+                    if "properties" not in node or not isinstance(
+                            node["properties"], dict):
+                        raise CodexCliError(
+                            "object schema must declare properties")
+                    properties = node["properties"]
                     node["additionalProperties"] = False
                     node["required"] = list(properties)
                 for value in node.values():
