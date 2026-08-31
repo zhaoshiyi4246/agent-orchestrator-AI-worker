@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R2 — 重复实现与旧入口收敛
-- 当前任务：R2-0 — AO 主运行路径可移植性修复（已完成）
-- 当前状态：E2E preflight 已将 K18 升级为当前 blocker；主运行路径修复及 live portability probe 已通过
-- 下一步：先运行一次完整真实 E2E Mission smoke；E2E PASS 后再进入 R2-1
+- 当前阶段：R2-0 — AO 主运行路径可移植性与 PR #6 合并审计
+- 当前任务：PR #6 用户运行时边界修正（已完成）
+- 当前状态：主生产路径可移植性、只读 attach 和用户-facing 文档边界均已通过验证
+- 下一步：PR #6 后先运行一次完整真实 E2E Mission；随后优先做 Competition behavior convergence，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -30,8 +30,8 @@
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
-| R2 | AO 主路径可移植性、重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；完整 E2E smoke 待运行） |
-| R3 | Worker 数量、Verifier、issue/thread 与控制语义收敛 | 未开始 |
+| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0/PR #6 合并审计；重复清理延后） |
+| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 未开始（完整 E2E 后优先） |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
@@ -180,14 +180,17 @@ E2E preflight 证明 `run_mission.py` 的 AO executable、data root 和 runfile 
 | Executor 环境 | 生产组装不再传入开发者 data root；`ActionExecutor` 不再无条件设置 `AO_DATA_DIR`，仅在明确 runfile 存在时设置 `AO_RUN_FILE` |
 | `auto_ff_master` | 默认仍关闭且 Git/push 行为未重构；仅显式 `CLAO_AO_DATA_DIR` 可启用 legacy worktree 推导，未设置时明确拒绝，继续归 R4 审计 |
 | 直接回归 | AO portability、runtime 组装、Panel/CLI 共享路径及既有 Worker spawn/model 回归：`42 passed` |
-| 完整离线测试 | `pytest tests -q`：`307 passed in 32.56s`，退出码 0 |
+| PR #6 合并审计回归 | 无 AO executable 时只读 attach 可加载已有 StateStore；正常 start 仍 fail fast；相关回归 `30 passed in 0.19s` |
+| 完整离线测试 | `pytest tests -q`：`308 passed in 32.18s`，退出码 0 |
 | 语法检查 | `python -m compileall -q src panel run_mission.py`，退出码 0 |
 | live portability probe | AO Desktop `0.12.9`；本机 executable 仅通过未提交的进程级 `CLAO_AO_BIN` 输入；未设置 `CLAO_AO_RUN_FILE`，默认 runfile 存在并解析到端口 `3001`；`AOAdapter.get_projects()` 成功返回 2 项；Executor 调用 `ao status --json` 退出 0、状态 `ready`；未创建 Worker |
 | 路径复扫 | `run_mission.py` 已无开发机绝对路径；当前机器 executable 路径未进入 Git；旧 AO Client/CLI、`llm_env.py`、worktree 兼容逻辑和测试夹具中的抽象/合成路径保留待 R2/R4 审计 |
 
-R2-0 关闭结论：K18 的生产主路径已解决；`auto_ff_master` 和兼容/历史遗留仍归
-R4/R2。当前下一步不是 R2-1，而是先运行一次完整真实 E2E Mission smoke；只有
-E2E PASS 后才进入 R2-1。
+R2-0 准确结论：K18 的主生产运行路径已解决，开发者绝对 AO 路径已移除；这不
+等于 K18 所涉及的全部用户交付可移植性已经完成。clean clone bootstrap/安装脚本
+归 clean-delivery，AO 首次配置 UX 归比赛 UX/clean-delivery，Project 注册/选择归
+比赛 UX/R4，`auto_ff_master` legacy data root 归 Competition convergence/R4。
+当前下一步是完整真实 E2E，随后优先做比赛行为收敛，不直接开始 R2-1。
 
 ## 十、已知问题清单
 
@@ -209,7 +212,7 @@ E2E PASS 后才进入 R2-1。
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R2-0/R4/R2 | 主路径已解决；`auto_ff_master`/compat 遗留仍归 R4/R2：生产入口不再含开发机 AO 路径，`llm_env.py` 与旧入口待引用审计 |
+| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径已解决：开发者绝对 AO 路径已移除。仍未解决：clean clone bootstrap/安装脚本、AO 首次配置 UX、Project 注册/选择、`auto_ff_master` legacy data root；不得宣称为通用安装包 |
 
 ## 十一、阶段边界
 
@@ -230,20 +233,22 @@ R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-
 
 ### R2
 
-R2-0 已先修复真实 E2E preflight 暴露的 AO 主路径可移植性 blocker。下一步先做
-完整真实 E2E Mission smoke；通过后再开始 R2-1，生成调用关系并每次只收敛一组
-重复实现。删除前必须有测试和入口证据。
+R2-0 已修复真实 E2E preflight 暴露的 AO 主路径可移植性 blocker，并在 PR #6
+合并审计中补齐只读 attach 与用户文档边界。重复实现清理不再作为 E2E 后的第一
+任务；待 Competition behavior convergence 完成后再开始 R2-1。删除前仍必须有
+测试和入口证据。
 
 ### R3
 
-收敛控制语义：
+完整 E2E 后优先做 Competition behavior convergence：
 
 - Worker 默认 1，最多 2；
-- Verifier 终局/高风险可选；
+- Verifier 默认 final/终局，高风险时可选，不再每个子任务默认调用；
+- 隐藏或显式标记 `auto_ff_master` 为实验性高风险功能；
 - 当前 `ClosedLoop` 仍有 bounded L0 direct worker nudge；R3 决定保留该
   fast path，还是将自动 Worker 指令统一路由 Planner；
-- fingerprint 去 source；
-- thread revision 支持多轮新证据。
+- fingerprint 去 source 与 thread revision 支持多轮新证据继续低优先级，
+  不阻塞比赛行为收敛。
 
 ### R4
 
@@ -266,9 +271,10 @@ R2-0 已先修复真实 E2E preflight 暴露的 AO 主路径可移植性 blocker
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-R1-1、R1-2、R1-3、R1-4 与 R2-0 已完成。下一步先运行完整真实 E2E Mission
-smoke；E2E PASS 后才开始 R2-1，生成主路径引用图并收敛第一组重复实现；删除前
-仍必须提供入口、import、运行路径和测试证据。
+当前顺序固定为：PR #6 → 单次完整真实 E2E → Competition behavior
+convergence → 重复模块清理 → clean delivery/installer/first-run。R1-1、R1-2、
+R1-3、R1-4 与 R2-0 主体已完成；本轮不启动 E2E、Worker/Verifier 策略调整或
+R2 删除。
 
 ## 十二、停止条件
 

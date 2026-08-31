@@ -71,15 +71,33 @@ Worker 指令：MissionController → ActionExecutor → AO
 - stop/resume；
 - Store 后置事件投影和 UI 时间线。
 
-## 后续阶段
+## AO 运行时与首次安装边界
 
-- R2：生成主路径引用图，逐组证明并收敛重复模块和旧入口；
-- R3：默认单 Worker、按需第二 Worker，收敛 Verifier、issue/thread 与控制权语义；
-- R4：通用 AO Project 选择、生效配置、人工 override 和自动审批权限；
-- R5：AO 路径与安装可移植性、CI、全新安装验证和干净交付。
+R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 是外部依赖，
+不随本仓库源码打包、安装或自动启动：
 
-当前没有承诺“任意电脑解压即可运行”。AO Desktop 需要单独安装和配置，
-`run_mission.py` 中仍存在待 R4/R5 收敛的本机 AO 路径。
+- AO executable：先读取 `CLAO_AO_BIN`，未设置时从 PATH 查找 `ao`；
+- daemon runfile：先读取 `CLAO_AO_RUN_FILE`，未设置时使用
+  `~/.ao/running.json`；
+- 正常 Mission 启动和恢复找不到 AO executable 时会立即报错；只读查看已有
+  Mission 存档不要求 AO executable，也不会连接 AO、调用 Codex 或创建 Worker。
+
+这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。clean clone 的
+首次 bootstrap/安装脚本、AO 首次配置体验以及 Project 注册/选择尚未完成；当前
+仓库不能宣称为通用安装包或“解压即用”产品。
+
+## 后续顺序
+
+1. 合并 PR #6 的 AO 运行时可移植性修复；
+2. 运行一次完整真实 E2E Mission；
+3. Competition behavior convergence：默认 1 个 Worker、确有必要时最多 2 个，
+   Verifier 默认只在 final/终局调用，并把 `auto_ff_master` 隐藏或明确标记为
+   实验性高风险功能；
+4. 再生成主路径引用图并清理重复模块和旧入口；
+5. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
+
+fingerprint 去 source 和 thread revision 继续作为低优先级治理项，不阻塞比赛
+行为收敛。
 
 ## 仓库结构
 
@@ -104,6 +122,10 @@ Worker 指令：MissionController → ActionExecutor → AO
 `交付/closed-loop-v2/.venv`、单独运行的 AO Desktop，以及已通过 ChatGPT
 登录的 Codex CLI。
 
+启动真实 Mission 前，需要先安装并运行 AO Desktop。若 `ao` 已在 PATH 中，无需
+额外设置 executable；否则在当前进程中将 `CLAO_AO_BIN` 指向已安装 AO CLI。
+仅当 AO 使用非标准 runfile 时才需要设置 `CLAO_AO_RUN_FILE`。
+
 ```powershell
 cd 交付/closed-loop-v2
 $venvScripts = (Resolve-Path ".\.venv\Scripts").Path
@@ -119,7 +141,7 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 创建 Worker、StateStore 或 runtime 目录。真实 Mission 运行需要 AO daemon 和
 已注册 Project。
 
-当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。
+测试数量以 CI 或当前真实命令输出为准，不在用户文档中冻结。
 
 ## 安全边界
 

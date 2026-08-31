@@ -6,7 +6,8 @@ Usage (from the closed-loop-v2 directory):
     ... add --dry-run to preflight Planner decomposition without touching AO.
 
 Wires: config -> AO daemon -> MissionController (Planner/Auditor/Verifier via
-Codex CLI; Workers temporarily created by the legacy AO harness;
+Codex CLI). Workers are AO Chat-mode Codex workers using the configured model
+(default gpt-5.6-sol).
 Observer/Gate use no model) -> LoopBus projection -> memory.md / project.md
 -> FINAL_REPORT.
 
@@ -193,11 +194,15 @@ class MissionRuntime:
             pass
 
 
-def build_runtime(mission_dict: dict, cfg: dict, *,
-                  dry_run: bool = False) -> MissionRuntime:
-    ao_bin = resolve_ao_bin()
+def build_runtime(mission_dict: dict, cfg: dict, *, dry_run: bool = False,
+                  require_ao: bool = True) -> MissionRuntime:
+    """Build a runtime; only read-only inspection may omit AO discovery."""
+    if not require_ao and not dry_run:
+        raise ValueError(
+            "require_ao=False is only valid for read-only inspection")
+    ao_bin = resolve_ao_bin() if require_ao else "ao-unavailable-read-only"
     ao_run_file = resolve_ao_run_file()
-    setup_environment(ao_run_file=ao_run_file)
+    setup_environment(ao_run_file=ao_run_file if require_ao else None)
     return MissionRuntime(
         mission_dict, cfg, ao_bin=ao_bin, ao_run_file=ao_run_file,
         dry_run=dry_run)

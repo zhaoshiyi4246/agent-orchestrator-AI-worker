@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 已完成；R2-0 已解除 AO 主运行路径可移植性 blocker；下一步先做完整真实 E2E Mission smoke
+- 状态：R1 已完成；R2-0 已解除 AO 主运行路径可移植性 blocker；下一步先做完整真实 E2E Mission smoke，再优先收敛比赛行为
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -83,6 +83,10 @@ R2-0 后，Panel 与 CLI 继续复用同一个 `build_runtime()`，并共享同�
 `ao-app` 或 `ao-data`。AO executable 依次由 `CLAO_AO_BIN`、PATH 中的 `ao`
 解析；daemon runfile 依次由 `CLAO_AO_RUN_FILE`、`~/.ao/running.json` 解析。
 任何开发机绝对路径都不属于产品契约。
+
+正常 Mission 启动与恢复必须成功解析 AO executable，失败时立即报错。Panel
+`/api/attach` 只是已有 StateStore 的只读查看路径，不启动 runner、不 step
+Controller，因此不要求 AO executable，也不连接 AO、调用 Codex 或创建 Worker。
 
 `MissionRuntime` 直接创建并注入：
 
@@ -219,7 +223,17 @@ AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
 
 本轮 live probe 从默认 runfile 解析到 daemon endpoint，`get_projects()` 与
 `ao status --json` 均成功，且未创建 Worker。完整真实 Mission 尚未运行；下一步
-先完成该 E2E smoke，通过后再进入 R2-1。
+先完成该 E2E smoke，通过后优先进入 Competition behavior convergence，而不是
+立即开始 R2-1 重复模块清理。
+
+K18 当前只关闭“主生产运行路径含开发者绝对 AO 路径”这一 blocker。它解决的是
+运行时路径可移植性，不是任意用户零配置安装，也不代表当前仓库是通用安装包。
+用户交付可移植性仍包括：
+
+- clean clone bootstrap/安装脚本：归最终 clean-delivery 阶段；
+- AO 首次配置 UX：归比赛 UX 与 clean-delivery 阶段；
+- Project 注册/选择：归比赛 UX/R4；
+- `auto_ff_master` legacy data root：归 Competition convergence/R4。
 
 ## 四、后续收敛目标架构
 
@@ -474,11 +488,16 @@ UI → 绕过 MissionController 改状态
 
 - R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
-- R2：R2-0 先修复 AO 主运行路径可移植性；完成真实 E2E smoke 后，再证明并
-  收敛重复模块、旧入口和参考代码；
-- R3：收敛 Worker、Verifier、issue/thread 与控制权语义；
+- R2：R2-0 先修复 AO 主运行路径可移植性；重复模块、旧入口和参考代码清理延后
+  到比赛行为收敛之后；
+- R3：优先收敛默认 Worker 1/最多 2、Verifier final/终局策略和
+  `auto_ff_master` 实验性高风险边界；fingerprint/thread revision 保持低优先级；
 - R4：收敛配置、项目选择和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。
+
+当前执行优先级为：PR #6 → 单次完整真实 E2E → Competition behavior
+convergence → 重复模块清理 → clean delivery/installer/first-run。该顺序优先于
+按阶段编号机械推进；E2E 通过后不立即开始 R2-1。
 
 ## 十、明确非目标
 
