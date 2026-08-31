@@ -151,7 +151,7 @@ class TaskSpec:
     worker_session_id: Optional[str] = None
     dependencies: List[str] = field(default_factory=list)
     required_evidence: List[str] = field(default_factory=list)
-    worker_harness: str = "claude-code"
+    worker_harness: str = "codex"
     budgets: Dict = field(default_factory=lambda: {
         "max_local_fixes": 2, "max_replans": 1,
         "max_same_alerts": 1, "max_runtime_seconds": 1800})
@@ -174,7 +174,7 @@ class TaskSpec:
             worker_session_id=d.get("worker_session_id"),
             dependencies=list(d.get("dependencies", [])),
             required_evidence=list(d.get("required_evidence", [])),
-            worker_harness=d.get("worker_harness", "claude-code"),
+            worker_harness=d.get("worker_harness", "codex"),
             budgets=dict(d.get("budgets", {})),
             subtask_of=d.get("subtask_of"))
 
@@ -335,7 +335,7 @@ class MissionSpec:
     acceptance_criteria: List[AcceptanceCriterion]
     gate_commands: List[str]
     user_instruction: str = ""
-    worker_harness: str = "claude-code"
+    worker_harness: str = "codex"
     budgets: Dict = field(default_factory=lambda: {
         "max_subtasks": 5, "max_total_replans": 3,
         "max_runtime_seconds": 7200})
@@ -354,7 +354,7 @@ class MissionSpec:
             acceptance_criteria=acs,
             gate_commands=list(d.get("gate_commands", [])),
             user_instruction=d.get("user_instruction", ""),
-            worker_harness=d.get("worker_harness", "claude-code"),
+            worker_harness=d.get("worker_harness", "codex"),
             budgets=dict(d.get("budgets", {})))
 
 

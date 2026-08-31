@@ -70,9 +70,8 @@ class ActionExecutor:
         self.data_dir = data_dir
         self.run_file = run_file
         self.store = store
-        # `ao spawn --model <m>`; empty = daemon default. The gateway default
-        # (deepseek-v4-pro) 403s for claude-code workers, so configs pin
-        # GLM-5.2 here (config/default.yaml worker.model).
+        # `ao spawn --model <m>`; empty deliberately selects the daemon
+        # default. Production config pins gpt-5.6-sol for the Codex worker.
         self.worker_model = worker_model or ""
         self.local_fixes = 0
         self.replans = 0
@@ -105,13 +104,10 @@ class ActionExecutor:
                prompt: str) -> Optional[str]:
         """Spawn a worker session; returns the new session id or None.
 
-        The harness may reject an explicit `--model` value depending on its
-        current login/config state (real-run evidence: the daemon accepted
-        `--model GLM-5.2` for days, then started answering CHAT_CONTROLLER_
-        FAILED 'Invalid value for config option model' while the same model
-        still worked via the ANTHROPIC_MODEL env default). On that specific
-        rejection, retry once WITHOUT --model — same effective model, zero
-        operator intervention.
+        AO's Codex harness accepts an explicit session model override, so a
+        configured model is sent exactly once. Spawn failures stay visible to
+        the existing transient/persistent budget classifier; there is no
+        speculative retry with a different model contract.
 
         Failure detail is kept on self._last_spawn_error so the caller can
         classify transient vs persistent (dual spawn budgets); transport
@@ -120,11 +116,6 @@ class ActionExecutor:
         try:
             proc = self._run(self._spawn_args(project_id, harness, name,
                                               prompt))
-            if proc.returncode != 0 and self.worker_model and \
-                    "config option model" in (proc.stderr or ""):
-                proc = self._run(self._spawn_args(project_id, harness, name,
-                                                  prompt,
-                                                  include_model=False))
         except Exception as e:  # timeout / transport -> transient
             self._last_spawn_error = "%s: %s" % (type(e).__name__, e)
             return None
@@ -245,8 +236,8 @@ class ActionExecutor:
         """Spawn the first worker for a task (no prior worker_session_id).
 
         Uses task.objective as the prompt and task.worker_harness (default
-        claude-code; V0.1 froze CODEX_ONLY but the harness is now a TaskSpec
-        field so the operator can switch without touching code).
+        codex; the harness remains a TaskSpec field so the operator can switch
+        without touching code).
         Returns the new session id or None on failure.
 
         Dual bounded budgets: PERSISTENT failures (config errors etc.) burn
@@ -262,7 +253,7 @@ class ActionExecutor:
         if self.spawn_cap_reached(task.task_id) or \
                 self._spawn_backoff_pending(task.task_id):
             return None
-        harness = getattr(task, "worker_harness", "claude-code") or "claude-code"
+        harness = getattr(task, "worker_harness", "codex") or "codex"
         gate = "; ".join(task.gate_commands or [])
         prompt = ("Task: %s\n\nAcceptance criteria:\n%s\n\n"
                   "Work within allowed paths only. Do not modify tests or "
@@ -384,7 +375,7 @@ class ActionExecutor:
             mission_replan_key = None
         spec = action.replacement_task_spec or {}
         prompt = spec.get("objective", task.objective)
-        harness = getattr(task, "worker_harness", "claude-code") or "claude-code"
+        harness = getattr(task, "worker_harness", "codex") or "codex"
         # Stop the old worker before spawning a new one (re-route, not fork).
         # `ao session kill` terminates the session cleanly; the worktree is kept.
         old_sid = action.target_session_id or task.worker_session_id

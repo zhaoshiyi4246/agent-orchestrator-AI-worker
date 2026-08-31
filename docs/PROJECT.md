@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 修正进行中（R0、R1-1、R1-2 已完成）
+- 状态：R1 修正进行中（R0、R1-1、R1-2、R1-3 已完成）
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -52,7 +52,7 @@ Integration Gate
 
 R0 必须用入口、import、调用关系和测试复核上述定位。未经证明，不删除任何历史来源目录。
 
-## 三、当前实现：R0/R1-2 代码事实
+## 三、当前实现：R0/R1-3 代码事实
 
 ### 1. 当前主入口与控制路径
 
@@ -91,6 +91,12 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
 
 ### 2. 当前角色的真实运行形态
 
+| 角色 | 物理运行形态 | 默认模型 |
+|---|---|---|
+| Planner / Auditor / Verifier | headless Codex CLI Provider | `gpt-5.6-sol` |
+| Worker | AO Codex Worker（harness=`codex`） | 显式 `--model gpt-5.6-sol` |
+| Observer / Integration Gate | 确定性普通程序 | no model |
+
 - Planner、Auditor、Verifier 都不是 AO Session。R1-1/R1-2 已将三个生产
   Provider 分别迁移为 `CodexCliPlannerProvider`、`CodexCliAuditorProvider`
   和 `CodexCliVerifierProvider`；三者复用 `codex_cli.run_codex_json()`，以
@@ -101,8 +107,11 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   类名仅作为待 R2 调用关系审计的兼容遗留；旧类名是 Codex Provider 的简单别名，
   不保留第二套 Claude 生产实现。
 - Worker 由 `ActionExecutor` 调用 `ao.exe spawn --kind worker` 创建，并通过
-  `ao send`、`ao session kill` 管理；当前 `worker_harness` 默认仍为
-  `claude-code`，`worker.model` 默认仍为 `GLM-5.2`。
+  `ao send`、`ao session kill` 管理。R1-3 在 AO Desktop `0.12.9` 上验证的真实
+  harness 值为 `codex`，Chat 接口使用 `--mode chat`，模型通过
+  `--model gpt-5.6-sol` 显式传递。`TaskSpec` 与 `MissionSpec` 缺省均为
+  `codex`，生产 `worker.model` 缺省为 `gpt-5.6-sol`；旧 GLM 的
+  “先带 model 失败、再去掉 model 重试” fallback 已移除。
 - `AOAdapter` 通过 AO REST 读取 Project/Session/Conversation/activity，并可
   调用 approval resolve；`ActionExecutor` 承担 AO CLI 写操作。
 - `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
@@ -408,7 +417,7 @@ UI → 绕过 MissionController 改状态
 ## 九、修正阶段
 
 - R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
-- R1：分步迁移 Codex Provider，并让代码注释、README、架构文档和前端拓扑说同一套真实架构；
+- R1：分步迁移 Codex Provider，并让代码注释、README、架构文档和前端拓扑说同一套真实架构；R1-3 已完成 Worker 迁移，下一步为 R1-4 文档/拓扑收尾；
 - R2：证明并收敛重复模块、旧入口和参考代码；
 - R3：收敛 Worker、Verifier、issue/thread 与控制权语义；
 - R4：收敛配置、项目选择和高风险功能；

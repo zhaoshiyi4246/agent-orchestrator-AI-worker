@@ -20,8 +20,9 @@ from loopcore.action_executor import ActionExecutor
 from loopcore.auditor import FakeAuditorProvider
 from loopcore.closed_loop import ClosedLoop
 from loopcore.event_observer import Observer
-from loopcore.mission_contracts import (PlannerAction, PlannerActionType,
-                                        ProjectState, TaskSpec)
+from loopcore.mission_contracts import (MissionSpec, PlannerAction,
+                                        PlannerActionType, ProjectState,
+                                        TaskSpec)
 from loopcore.mission_gate import IntegrationGate
 from loopcore.planner_adapter import FakePlannerProvider
 from loopcore.state_store import StateStore
@@ -41,6 +42,95 @@ def _executor(tmp_path, **kw):
 def _failed_proc(rc=1):
     return subprocess.CompletedProcess(args=[], returncode=rc,
                                        stdout="", stderr="boom")
+
+
+def test_worker_contract_defaults_to_codex():
+    direct_task = TaskSpec(
+        task_id="T-CODEX", project_id="scratch", objective="reply only",
+        allowed_paths=[], forbidden_paths=[], acceptance_criteria=[],
+        gate_commands=[])
+    assert direct_task.worker_harness == "codex"
+
+    task = TaskSpec.from_dict(_task_spec())
+    assert task.worker_harness == "codex"
+
+    mission = MissionSpec.from_dict({
+        "mission_id": "M-CODEX",
+        "project_id": "scratch",
+        "objective": "reply only",
+        "allowed_paths": [],
+        "forbidden_paths": [],
+        "acceptance_criteria": [],
+        "gate_commands": [],
+    })
+    assert mission.worker_harness == "codex"
+
+
+def test_codex_spawn_argv_and_session_id(tmp_path, monkeypatch):
+    store = StateStore(str(tmp_path / "cl.db"))
+    ex = ActionExecutor("ao", "d", "r", store,
+                        worker_model="gpt-5.6-sol")
+    task = TaskSpec.from_dict(_task_spec())
+    proc = subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout="spawned session scratch-1\n", stderr="")
+    run = MagicMock(return_value=proc)
+    monkeypatch.setattr(ex, "_run", run)
+
+    assert ex._spawn(task.project_id, task.worker_harness,
+                     "worker-test", "reply only") == "scratch-1"
+    assert run.call_count == 1
+    argv = run.call_args.args[0]
+    assert argv[:5] == ["spawn", "--kind", "worker", "--project",
+                        task.project_id]
+    assert argv[argv.index("--harness") + 1] == "codex"
+    assert argv[argv.index("--mode") + 1] == "chat"
+    assert argv[argv.index("--model") + 1] == "gpt-5.6-sol"
+
+
+def test_model_rejection_does_not_retry_without_model(tmp_path, monkeypatch):
+    store = StateStore(str(tmp_path / "cl.db"))
+    ex = ActionExecutor("ao", "d", "r", store,
+                        worker_model="gpt-5.6-sol")
+    rejected = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="",
+        stderr="Invalid value for config option model")
+    run = MagicMock(return_value=rejected)
+    monkeypatch.setattr(ex, "_run", run)
+
+    assert ex._spawn("scratch", "codex", "worker-test", "reply only") is None
+    assert run.call_count == 1
+    assert "--model" in run.call_args.args[0]
+
+
+def test_replan_spawn_keeps_codex_harness_and_model(tmp_path, monkeypatch):
+    store = StateStore(str(tmp_path / "cl.db"))
+    ex = ActionExecutor("ao", "d", "r", store,
+                        worker_model="gpt-5.6-sol")
+    task = TaskSpec.from_dict(_task_spec())
+    task.worker_session_id = "w-old"
+    action = PlannerAction(
+        action_id="ACT-CODEX-REPLAN", task_id=task.task_id,
+        action=PlannerActionType.REPLAN_SPAWN, reason="retry",
+        replacement_task_spec={"objective": "reply only"})
+    calls = []
+
+    def fake_run(argv, *args, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["session", "kill"]:
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="killed", stderr="")
+        return subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="spawned session w-new\n", stderr="")
+
+    monkeypatch.setattr(ex, "_run", fake_run)
+    result = ex.execute(action, task)
+
+    assert result.ok and result.new_worker_session_id == "w-new"
+    spawn_argv = calls[1]
+    assert spawn_argv[spawn_argv.index("--harness") + 1] == "codex"
+    assert spawn_argv[spawn_argv.index("--model") + 1] == "gpt-5.6-sol"
 
 
 def test_spawn_retry_cap_and_backoff(tmp_path, monkeypatch):
