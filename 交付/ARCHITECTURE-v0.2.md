@@ -1,155 +1,223 @@
-# 闭环多智能体系统 v0.2 整合架构基线
+# v0.2 当前架构说明
 
-> 状态：待搭建 · 2026-08-30
-> 上游来源：CL-AO v0.1（组员，严谨控制层）+ ao-supervision-sidecar（Claude，mission 产品化能力）
-> 本文档是后端搭建的唯一权威基线；任何偏离本文档的修改需征得项目负责人同意。
+> 状态：R1 实现事实基线
+>
+> 权威架构：与仓库根目录 `docs/PROJECT.md` 保持一致
+> 当前主产品候选：`交付/closed-loop-v2/`
 
-## 一、角色定编（最终）
+本文描述 R1 结束时已经存在的运行路径。逻辑职责关系不等于真实物理消息路径；
+R2/R3/R4 的后续目标会明确标注，不提前写成当前能力。
 
-| 角色 | 数量 | 本质 | 职责 |
-|---|---|---|---|
-| Planner | 1 | LLM agent（AO orchestrator 会话） | 理解用户目标、拆解 mission、派发 Worker、裁决升级、维护 `memory.md` 与 `project.md` |
-| Supervisor 监督台 | 1 套 | **Observer（确定性程序）+ Auditor（LLM agent，只读）** | 监督 Worker、卡住时介入纠错、预判/发现大问题后提交 Planner 裁决 |
-| Verifier | 1 | LLM agent + Gate（确定性程序） | PV 任务验证、独立验收、反作弊检查、项目级集成测试 |
-| Worker | ≥2 | LLM agent（AO worker 会话） | 边界清晰的编码任务、提交验证证据、受阻时可直接上报 Planner |
+## 一、当前物理控制架构
 
-**模型策略**：不使用 Codex。Worker 默认 claude-code（GLM-5.2 已实机验证）；Planner/Auditor/Verifier 可用 Claude / GLM / Kimi，配置于 `config/default.yaml` 的 `worker.model` / `roles.*.model`。
-
-### 1.1 监督台内部职责划分（关键决策）
-
-- **Observer（程序，非 agent）**：固定间隔只读轮询 AO 公开 REST；确定性识别 `REPEATED_FAILURE` / `STALL` / `MILESTONE` / 预算阈值与预判性风险信号；输出 trigger + evidence，不作语义决策。继承 CL-AO `observer.py` 的进展签名与 fingerprint 纪律。
-- **Auditor（agent，只读）**：接收 Observer 证据包或 Worker 主动上报，做语义审计；只允许输出 `PASS / LOCAL_FIX / REPLAN / HUMAN / ESCALATE` 五类结论；`LOCAL_FIX` 直接返回 Worker（L0 局部闭环），其余进入 Planner 裁决（L1）。只读性 = 提示契约 + 执行前后公开 REST 状态核验（沿用 CL-AO 纪律）。
-
-不合并为纯 agent 的原因：心跳式检测必须零模型成本、零幻觉；语义判断才用 LLM。
-
-## 二、全连接循环通道（Loop Bus）
-
-所有 agent 之间的通道敞开、可循环工作，由一个**确定性消息总线（Loop Bus，普通程序）**承载。Bus 是唯一接触 AO 传输层的组件，agent 之间不直接互发。
-
-### 2.1 消息信封（Envelope）
-
-```json
-{
-  "msgId": "uuid",
-  "threadId": "mission-or-issue 关联 ID",
-  "from": "planner|auditor|verifier|worker:<id>|observer|gate|human",
-  "to":   "同上",
-  "kind": "见 2.2",
-  "payload": {},
-  "idempotencyKey": "由 threadId+from+阶段确定性生成",
-  "hop": 0
-}
+```text
+┌──────────────────────────────────────────┐
+│ Web Panel / run_mission                  │
+│ Mission 输入、状态查看、人工指令          │
+└────────────────────┬─────────────────────┘
+                     │
+┌────────────────────▼─────────────────────┐
+│ MissionController                        │
+│ 唯一控制平面                             │
+│                                          │
+│ ├─ Planner Provider                      │
+│ ├─ Auditor Provider                      │
+│ ├─ Verifier Provider                     │
+│ ├─ Deterministic Observer                │
+│ ├─ Integration Gate                      │
+│ ├─ AOAdapter / ActionExecutor            │
+│ └─ Worker / merge orchestration          │
+└───────────────┬─────────────────┬────────┘
+                │                 │
+      ┌─────────▼─────────┐  ┌────▼──────────────┐
+      │ StateStore        │  │ AO Desktop        │
+      │ CL-AO 唯一运行    │  │ Session / Agent   │
+      │ 状态源            │  │ activity/worktree │
+      └─────────┬─────────┘  └───────────────────┘
+                │
+      ┌─────────▼───────────────────────────────┐
+      │ StoreBusProjector / Event Projection    │
+      │ JSONL、Markdown、UI Timeline、拓扑展示  │
+      └─────────────────────────────────────────┘
 ```
 
-传输纪律完全继承 CL-AO：`clientMessageId` 幂等、Duplicate 恢复只接受 `role=user`/`origin=human`/正文严格相等/`turnId` 非空的唯一消息、其余 fail closed。
+当前对外入口有两条，并复用同一个 `build_runtime()` 组装路径：
 
-### 2.2 两两通道矩阵（精确方向，项目负责人已裁决）
+```text
+启动面板.bat → panel/server.py → PanelState.start_mission()
+  → run_mission.build_runtime() → MissionController.step()
 
-规则：**Auditor→Verifier 单向、Observer→Verifier 单向，其余两两之间全部双向**。Observer 与 Gate 是程序：它们对外只发信号，收到的只能是"指令"类消息。
+run_mission.py main()
+  → build_runtime() → run_loop() → MissionController.step()
+```
 
-| 通道对 | 方向 | 消息类型 |
-|---|---|---|
-| Planner ↔ Worker | **双向** | P→W：`TASK_DISPATCH` / `LOCAL_FIX` / `REPLAN_DISPATCH`；W→P：`BLOCKER_REPORT` / `CHECKER_REQUEST` |
-| Planner ↔ Auditor | **双向** | P→A：`AUDIT_REQUEST`；A→P：`AUDIT_REPORT` / `ESCALATION` |
-| Planner ↔ Verifier | **双向** | P→V：`PV_TASK`；V→P：`PV_RESULT` / `VERDICT` |
-| Planner ↔ Observer | **双向** | P→O：`WATCH_DIRECTIVE`（调整观察焦点/阈值）；O→P：`RISK_SIGNAL` |
-| Planner ↔ Gate | **双向** | P→G：`GATE_RUN`；G→P：`GATE_EVIDENCE` |
-| Worker ↔ Auditor | **双向** | W→A：`STATUS_CLAIM`；A→W：`LOCAL_FIX` / `AUDIT_QUERY` |
-| Worker ↔ Verifier | **双向** | W→V：`VERIFY_REQUEST`；V→W：`FIX_REQUEST` |
-| Worker ↔ Observer | **双向** | W→O：`STATUS_NOTE`；O→W：`STALL_NOTICE`（停滞提醒，非指令） |
-| Auditor ↔ Observer | **双向** | A→O：`FOCUS_WATCH`（要求定向观察）；O→A：`TRIGGER` |
-| Auditor → Verifier | **单向** | A→V：`AUDIT_VERIFY_REQUEST`（请求硬性验证证据；结果只能经 Verifier→Planner 回流，Auditor 不直接收） |
-| Observer → Verifier | **单向** | O→V：`TRIGGER_VERIFY`（里程碑等触发验证；Verifier 不回传 Observer） |
-| 任意 → Human | 单向 | `HUMAN`（人工兜底） |
-| Planner → 用户 | 单向 | `FINAL_REPORT`（**所有最终结果由 Planner 总结后统一报告用户**） |
-| 用户 → 任意 agent | 单向直发 | `USER_DIRECTIVE`（前端输入框直发任何 agent） |
-| 用户 → Planner（镜像） | 自动 | `USER_DIRECTIVE_COPY`（见下方可见性规则） |
+Panel 自行维护轮询线程，没有调用 `run_loop()`，但没有创建第二套 Controller。
 
-**用户指令可见性规则（2026-08-30 裁决）**：用户可以在输入框中对任何一个 agent 直接下发指令或修改命令。发给 **Planner 的任务安排是私密的**，只有 Planner 能看到；发给**其他任何 agent 的指令，Bus 自动镜像一份 `USER_DIRECTIVE_COPY` 给 Planner**——即用户的一切指令 Planner 必然可见。该规则在后端由 Loop Bus 强制（路由表 + 镜像逻辑），在前端由输入框的目标选择器和"Planner 可见"标识体现。
+## 二、当前角色与程序
 
-设计理由：Auditor→Verifier 与 Observer→Verifier 保持单向，是为了让"验证结论的出口"唯一收敛到 Planner——Verifier 的任何结果都经 `PV_RESULT`/`VERDICT` 回 Planner，再由 Planner 决定是否转发 Auditor，避免监督方与验证方绕过裁决层直接对循环。
+| 角色或程序 | 数量与物理形态 | 默认模型 | 当前职责与控制权 |
+|---|---|---|---|
+| Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 拆解 Mission、接收 Audit/Gate/Verifier 证据并裁决；不直接编辑代码 |
+| Auditor | 1 个只读 headless Codex CLI Provider | `gpt-5.6-sol` | 做语义审计并向 Planner 提交结果；不直接向 Worker 下发自动指令 |
+| Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 当前在子任务 Gate 后和 Mission 终局调用；只输出验证结果，不拥有 Worker 控制权 |
+| Worker | AO Chat-mode Codex Worker | `gpt-5.6-sol` | harness=`codex`；在 AO worktree 执行具体编码任务 |
+| Observer | 确定性普通程序 | no model | 从 AO 事件产生 trigger 与 evidence，不做语义裁决 |
+| Integration Gate | 确定性普通程序 | no model | 运行预配置显式 argv，记录退出码、输出与 Git 证据 |
 
-### 2.3 双通道提交与去重（重点需求）
+Planner、Auditor、Verifier 都不是 AO Session。它们通过共享的 Codex CLI
+调用边界使用 stdin、`--ephemeral`、`--sandbox read-only`、结构化输出
+schema 和本地 validator。默认认证复用 Codex CLI 的 ChatGPT 登录，不以
+OpenAI API Key 作为默认接入路径。
 
-Worker 受阻可直接报 Planner，监督台发现同一问题也可同时报 Planner——两渠道**都保持开放**。去重由 Bus 完成：
+Worker 由 `ActionExecutor` 通过 AO CLI 创建和管理：
 
-- 每份上报计算 `issueFingerprint`（任务 ID + 规范化错误指纹 + 证据来源命名空间，沿用 CL-AO `normalize_failure_fingerprint` 纪律）；
-- 相同 fingerprint 的后续上报**不重复触发裁决**，只追加证据并回执"已并入既有裁决 thread"；
-- Planner 对每个 thread 只裁决一次，裁决结果广播给所有上报方。
+```text
+ao spawn --kind worker --harness codex --mode chat --model gpt-5.6-sol
+ao send ...
+ao session kill ...
+```
 
-### 2.4 有界循环（防死循环）
+Panel Mission payload、`MissionSpec`、`TaskSpec`、当前
+`tasks/mission-quick.json` 和 `task-spec.schema.json` 的默认 harness
+均为 `codex`；Worker model 由 `config/default.yaml` 的 `worker.model`
+进入 `ActionExecutor`，Panel 不另行硬编码 model。
 
-每个 `threadId` 携带 hop 计数与预算（最大审计次数、最大 LOCAL_FIX 次数、总时间上限，默认继承 CL-AO：max-audits 3、overall-timeout 600s）；超限或检测到进展签名停滞 → 确定性转 `HUMAN`。Bus 不建立后台服务，前台有界运行。
+当前系统仍允许 Mission 拆出多个子任务，Panel 默认
+`max_subtasks=2`。默认 1 个 Worker、只有任务确实独立时才启用第 2 个，是
+R3 目标，不是当前实现不变量。
 
-### 2.5 监督节奏（用户可精确调控）
+Verifier 当前仍在每个子任务 Gate 后和 Mission 最终 Gate 后调用。“只在终局
+或高风险场景调用”是 R3 目标，不是当前事实。
 
-所有时间参数集中在 `config/default.yaml`，**用户输入多久就是多久**，程序不做二次取整或下限钳制（仅要求为正数）：
+## 三、控制权与真实消息路径
 
-| 参数 | 推荐默认值 | 含义 |
-|---|---|---|
-| `observer.interval_seconds` | **10** | Observer 轮询间隔 |
-| `auditor.audit_interval_seconds` | **300**（5 分钟） | 无触发时的例行审计节奏；有 TRIGGER 时立即审计，不受此间隔限制 |
-| `observer.stall_threshold_seconds` | 300 | 停滞判定阈值 |
-| `observer.failure_threshold` | 2 | 重复失败判定次数 |
-| `bus.max_audits_per_thread` | 3 | 单 thread 最大审计轮数 |
-| `bus.overall_timeout_seconds` | 600 | 单 thread 总时间上限 |
+`MissionController` 是唯一控制平面。Mission/Task 状态迁移、预算、恢复、
+Worker 派发、合并、Gate 和 Verifier 调用都由它或其直接组装的
+`ClosedLoop` 完成。
 
-### 2.6 预判机制（诚实边界）
+核心逻辑职责关系是：
 
-"提前预判错误"由三层实现，**能系统性提前拦截一大类问题，但不承诺预知所有错误**：
+```text
+User → MissionController
+MissionController → Planner
+Planner → Worker
+Worker → MissionController
+Observer → Auditor
+Auditor → Planner
+Gate → MissionController / Auditor
+Verifier → MissionController / Planner
+MissionController ↔ StateStore
+MissionController ↔ AO
+```
 
-1. **确定性预警（Observer，程序）**：错误指纹首次出现即预警（不等到达阈值）、接近预算 80% 预警、修改越出 `allowed_paths` 边界、长时间无 commit；
-2. **派发前预检（Auditor，agent）**：Planner 派发前，Auditor 对任务拆解做语义预检（路径冲突、依赖环、验收条件不可测、范围漂移），不通过则退回 Planner 重拆；
-3. **记忆模式匹配（Planner + memory.md）**：历史失败模式入库，新任务命中相似模式时自动附加约束。
+这张逻辑关系图不表示存在对应的点对点物理 Agent 通道。特别是：
 
-### 2.3 双通道提交与去重（重点需求）
+- Auditor 不直接向 Worker 自动投递 `LOCAL_FIX`；
+- Verifier 不直接向 Worker 投递 `FIX_REQUEST`；
+- Observer 不直接控制 Worker；
+- 只有 Planner 的裁决可经 Controller/ActionExecutor 转成 Worker 自动指令；
+- Gate 和 Verifier 结果先进入 Controller/Store，再成为 Planner 可用证据。
 
-Worker 受阻可直接报 Planner，监督台发现同一问题也可同时报 Planner——两渠道**都保持开放**。去重由 Bus 完成：
+用户指令的真实路径是：
 
-- 每份上报计算 `issueFingerprint`（任务 ID + 规范化错误指纹 + 证据来源命名空间，沿用 CL-AO `normalize_failure_fingerprint` 纪律）；
-- 相同 fingerprint 的后续上报**不重复触发裁决**，只追加证据并回执"已并入既有裁决 thread"；
-- Planner 对每个 thread 只裁决一次，裁决结果广播给所有上报方。
+```text
+Panel /api/directive
+  → DirectiveChannel
+  → MissionController._apply_directives()
+     ├─ Planner：写入 ClosedLoop.instruct
+     ├─ Auditor/Verifier：写入对应 role_directives
+     ├─ Worker：ActionExecutor.nudge_worker() → ao send
+     └─ Observer/Gate：只镜像给 Planner
+```
 
-### 2.4 有界循环（防死循环）
+面板另外把用户指令写入 `bus_traffic.jsonl` 用于展示；这不是指令经
+`LoopBus` 投递。
 
-每个 `threadId` 携带 hop 计数与预算（最大审计次数、最大 LOCAL_FIX 次数、总时间上限，默认继承 CL-AO：max-audits 3、overall-timeout 600s）；超限或检测到进展签名停滞 → 确定性转 `HUMAN`。Bus 不建立后台服务，前台有界运行。
+## 四、状态源与恢复
 
-## 三、项目记忆文件（Planner 维护）
+| 数据 | 当前权威来源 |
+|---|---|
+| Mission、Task、状态迁移、预算、审计、Planner action、Gate、Verifier、恢复索引 | `StateStore` |
+| Worker Session、Conversation、turn、activity、workspace/worktree | AO 公开快照 |
+| Git commit、diff、工作区 | Git 与 AO workspace 事实 |
+| UI 时间线、Bus traffic、Markdown、JSONL、拓扑 | 派生投影 |
 
-系统工作期间至少维护两个工作文件，位于目标项目根目录：
+`StateStore` 不是辅助索引，而是 CL-AO Mission/Task/预算/裁决/恢复的唯一
+运行状态源。AO Snapshot 则是 Worker 运行状态的外部事实源。Controller 恢复
+时读取 Store，并按需与 AO 事实核对。
 
-- **`project.md`** — 重大事项与进展记录：mission 拆解、每次裁决结论、Worker DONE、Gate/Verifier 结果、人工介入记录。
-- **`memory.md`** — 项目记忆：任务上下文、已确认的事实、历史失败模式、复用决策。
+`memory.md`、`project.md` 和 `bus_traffic.jsonl` 位于
+`closed-loop-v2/runtime/<mission_id>/`，不写入目标项目根目录，也不参与
+恢复或裁决。
 
-写入纪律：Planner 在每轮裁决输出中携带 `memoryUpdates` / `projectUpdates` 条目；**Bus 负责原子落盘**（Planner 生成内容、程序保证写入，双保险不丢失）。两个文件随 mission 归档。
+## 五、LoopBus 的当前定位
 
-## 四、两级闭环（保留 CL-AO 分层）
+`LoopBus` 当前不是控制总线，也不是唯一 AO 传输层。
+`StoreBusProjector` 在 Controller 已写入 StateStore 后追读新行，将其转换为
+经过路由和预算校验的 Envelope，再写入：
 
-- **L0 局部闭环**：明确归属当前 Worker 的问题（编译/测试失败、审批卡死等）→ Auditor `LOCAL_FIX` 直接回 Worker，不升级。
-- **L1 项目级闭环**：停滞、偏航、根因错误、跨任务集成问题 → Observer/Auditor/Worker 任一渠道 → Planner 裁决 → 重新派发 → 再验证。
-- **终局**：全部子任务 DONE 后必须过 Integration Gate（clean checkout、显式 argv、`shell=False`、确定性证据）+ Verifier 独立验收，失败证据自动回流 Auditor/Planner/Worker。
+- 进程内投影列表；
+- `bus_traffic.jsonl`；
+- `memory.md` / `project.md`；
+- Panel 的事件时间线。
 
-## 五、从两条既有代码线的取舍
+投影接收端当前是 no-op sink；投影失败记录在 `StoreBusProjector.errors`，
+不会回写控制状态。真实 AO 读取由 `AOAdapter` 完成，真实 Worker 写操作由
+`ActionExecutor` 完成。
 
-| 能力 | 来源 | 处置 |
-|---|---|---|
-| AO Client（daemon 发现、OpenAPI 校验、Conversation 读写、幂等恢复） | CL-AO `ao_client.py` | **直接继承**，扩展 approvals resolve |
-| 严格协议（AuditRequest/Report/PlannerDecision 四决策） | CL-AO `protocol.py` | **继承并扩展** Envelope 与 PV/CHECKER 类型 |
-| Deterministic Observer | CL-AO `observer.py` | **继承**，合并 sidecar 的 NO_PROGRESS 规则与指纹归一化 |
-| Integration Gate | CL-AO `integration_gate.py` | **继承**（clean checkout、显式 argv、稳定 evidence） |
-| Mission 拆解与状态机 | sidecar `mission.py` / `mission_cli.py` | **移植**，状态机重写为 Bus 驱动 |
-| 受限自动审批（allowed_paths + 安全命令白名单） | sidecar `closed_loop.py` / `ao_adapter.resolve_approval` | **移植**，审批策略入 `config/default.yaml` |
-| 双 Worker 并行 + worktree 隔离合并 | sidecar `worktree.py` | **移植**，支持 ≥2 Worker |
-| 独立 Verifier + anti-gaming | sidecar `verifier.py` + prompts | **移植** |
-| SQLite 状态存储（重启水合恢复） | sidecar `state_store.py` | **移植**，但与 CL-AO 幂等恢复并存：重启先查 AO Snapshot，DB 只作本地索引 |
-| 309 项离线测试纪律 | CL-AO | **延续**，新模块同标准 |
+因此：
 
-## 六、不变量（不可破坏）
+```text
+StateStore / AO facts
+        ↓
+StoreBusProjector
+        ↓
+Event Projection / Audit Timeline / UI
+```
 
-1. 项目级控制权只属于唯一 Planner；
-2. Observer/Gate 是程序不是 agent，语义判断才用 LLM；
-3. Auditor 只读；Verifier 不改实现代码；
-4. 所有通道消息幂等、可恢复、fail closed；
-5. 每个 thread 有界，超限转 HUMAN；
-6. Worker 自报完成不单独作为完成依据；
-7. 不使用 Codex。
+Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不用于运行时
+恢复、去重、预算判断或裁决。
+
+## 六、当前已实现
+
+- Panel 发起 Mission，CLI/Panel 复用运行时组装；
+- Planner 自动分解；
+- AO Codex Worker 执行；
+- Observer 确定性观察；
+- Auditor → Planner 闭环；
+- Integration Gate；
+- 当前子任务级与 Mission 终局 Verifier；
+- StateStore 持久化和恢复；
+- stop/resume；
+- Store 后置投影与 UI 时间线。
+
+当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。
+
+## 七、后续边界
+
+- R2：生成主路径引用图，逐组证明并收敛重复 AO Client、Observer、Gate、
+  协议和旧 CLI；在此之前不删除参考目录或兼容模块。
+- R3：默认 1 个 Worker、必要时最多 2 个；收敛 Verifier 调用策略、
+  issue fingerprint 和 thread revision；自动 Worker 指令统一由 Planner 发出。
+- R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
+  保持自动 push/merge 默认关闭。
+- R5：CI、全新 clone 安装、AO 官方依赖说明、路径可移植性、真实 Demo 和
+  干净交付。
+
+当前生产主路径不使用 `llm_env.py`。该文件、旧 Provider 类名兼容别名，
+以及 `tasks/mission-quick-002.json` 至 `mission-quick-014.json` 中保留的
+旧 harness 值属于兼容或历史运行证据，不是当前默认入口；R2 在调用关系证明后
+再决定保留、隔离或删除。
+
+## 八、当前不变量
+
+1. `MissionController` 是唯一控制平面；
+2. `StateStore` 是唯一 CL-AO 运行状态源；
+3. AO Snapshot 是 Worker 运行事实源；
+4. Observer 和 Integration Gate 是确定性程序，不使用模型；
+5. Auditor 只读并只向 Planner 提交审计结果；
+6. Verifier 只输出证据，不直接控制 Worker；
+7. Planner 项目级唯一，只有 Planner 可以触发自动 Worker 指令；
+8. Bus 和所有展示产物都是派生投影，不参与恢复或裁决；
+9. 模型与 harness 可配置，当前默认契约为 Codex / `gpt-5.6-sol`；
+10. 自动 push、自动合并和破坏性审批保持默认关闭。

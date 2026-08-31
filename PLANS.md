@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R1 — Provider 迁移与架构事实统一
-- 当前任务：R1-3 — 验证并迁移 AO Codex Worker harness/model
-- 当前状态：R1-3 已通过离线全测、raw AO Worker probe 与 ActionExecutor live smoke，R1 继续进行
-- 下一步：R1-4 — 统一真实架构文档、README 和前端拓扑表述
+- 当前阶段：R2 — 重复实现与旧入口收敛
+- 当前任务：R1-4 — 架构、README、前端拓扑与 Panel Worker 契约统一（已完成）
+- 当前状态：R1 已完成；生产 Codex 契约、当前文档与展示已统一
+- 下一步：R2-1 — 生成主路径引用图并收敛第一组重复实现
 
 ## 一、更新规则
 
@@ -29,8 +29,8 @@
 | 阶段 | 目标 | 状态 |
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
-| R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 进行中 |
-| R2 | 重复模块、旧入口和参考代码收敛 | 未开始 |
+| R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
+| R2 | 重复模块、旧入口和参考代码收敛 | 进行中（R2-1 待开始） |
 | R3 | Worker 数量、Verifier、issue/thread 与控制语义收敛 | 未开始 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
@@ -143,42 +143,62 @@ R1-3 关闭结论：AO Codex Worker 已按本机公开 CLI 契约迁移到
 `codex` + 显式 `--model gpt-5.6-sol`，两个成功 live smoke 与离线全测均通过；
 K16 完全解决。R1 下一独立任务为 R1-4，不直接进入 R2。
 
-## 八、已知问题清单
+## 八、R1-4 验收证据
+
+| 项目 | 结果 |
+|---|---|
+| Panel Worker 契约 | R1-4 审计发现 `panel/server.py` 仍显式覆盖 `worker_harness=claude-code`；已做唯一必要的运行时一行修正为 `codex`，Panel 不硬编码 model |
+| schema 契约 | `schemas/task-spec.schema.json` 的 `worker_harness.default` 已从 `claude-code` 修正为 `codex` |
+| 生产默认一致性 | Planner/Auditor/Verifier 均为 headless Codex CLI、默认 `gpt-5.6-sol`；Panel/CLI、MissionSpec、TaskSpec、初始 spawn、REPLAN spawn 与 `mission-quick.json` 均为 AO `codex` harness；Worker model 由 `worker.model=gpt-5.6-sol` 注入 ActionExecutor |
+| 最小回归 | 新增唯一 AST 回归 `test_panel_worker_contract.py`；Panel/Worker 相关直接回归 `16 passed in 0.96s` |
+| 当前文档 | 根 README、交付说明、v2 README、`ARCHITECTURE-v0.2.md` 与 `docs/PROJECT.md` 已统一 MissionController、StateStore、AO Snapshot、角色与当前 Verifier/Worker 边界 |
+| 前端拓扑 | 从全连接 Agent 通道改为以 MissionController 为中心的控制/证据流；StateStore、AO 和 Event Projection/Timeline 明确分层；没有 Auditor/Verifier/Observer → Worker 自动控制边 |
+| 兼容/历史边界 | `llm_env.py`、旧 Provider 类名别名、旧 Mission JSON 与相关测试注释保留为兼容/历史证据，不进入当前默认生产组装路径，待 R2 引用审计 |
+| 完整离线测试 | `pytest tests -q`：`296 passed in 31.96s`，退出码 0；比 R1-3 增加的 1 项是 Panel Worker 契约回归 |
+| 语法与结构 | `compileall -q src panel run_mission.py` 退出码 0；Panel HTML 可由 stdlib parser 读取，task schema JSON 可解析且默认值断言为 `codex` |
+| 文本扫描 | 当前生产入口不存在有效 Claude/GLM 默认值；当前对外 README/架构/前端不存在“不使用 Codex”、Claude/GLM 当前模型、Worker ≥2 不变量或 Bus 唯一 AO 传输层等错误事实 |
+| 视觉 QA 边界 | 本地 Panel 服务可启动；当前会话无可用内置/扩展浏览器实例，因此未执行截图式浏览器视觉检查 |
+
+R1-4 关闭结论：生产入口、schema、当前文档和前端拓扑已经统一到真实 Codex
+运行契约；K1、K2、K13、K17 关闭，R1 完成。下一步进入 R2-1，不提前删除
+任何兼容模块或历史来源目录。
+
+## 九、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
 |---|---|---|---|
-| K1 | 旧架构文档与代码主路径不一致 | R1 | 已确认：角色运行形态、Bus 职责和入口描述均与代码不同 |
-| K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已确认：当前 Bus 是 Store 后置审计投影，不是控制或 AO 指令路径 |
+| K1 | 旧架构文档与代码主路径不一致 | R1 | 已解决：当前 README、交付说明、架构文档、PROJECT 和前端均与真实主路径一致 |
+| K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
 | K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 已确认：主路径与兼容/历史模块同时存在 |
 | K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已确认：面板和示例默认 `max_subtasks=2`，Planner 提示要求 `2..max` |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 已确认：当前每个子任务和 Mission 终局都调用 Verifier；实际结果回 Controller/Planner 路径 |
 | K7 | issue fingerprint 包含 source | R3 | 已确认：`issue_fingerprint()` 返回值显式包含 `source` |
 | K8 | thread 缺少 revision 裁决语义 | R3 | 已确认：同一 issue 只允许一次 verdict，没有 revision 字段或重裁决路径 |
-| K9 | 多套状态与投影没有明确主从 | R1/R2 | 已否定：代码主从已明确为 StateStore/AO Worker 事实与后置投影；文档表达仍需 R1 统一 |
+| K9 | 多套状态与投影没有明确主从 | R1/R2 | 已解决：代码与当前文档均明确 StateStore/AO Worker 事实与后置投影关系；R2 只处理重复实现 |
 | K10 | 配置项重复、未接线或 UI/后端语义不同 | R4 | 已确认：`roles.*`、`roles.max_parallel_workers`、`ao.base_url` 等未被当前组装路径完整消费 |
 | K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
 | K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
-| K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已确认：文档声称 247/272，本次实际收集 252 项 |
+| K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已解决：清理永久冻结数字；R1-3 main 基线为 295，R1-4 实跑 296，以后以 CI/当前输出为准 |
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
-| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：缺省 harness 为已 live probe 验证的 `codex`，生产 model 为显式 `--model gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
-| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 部分解决：Provider/Worker 运行配置已解决，旧 README/ARCHITECTURE 与前端拓扑待 R1-4 统一 |
-| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 未解决：R1-2 不扩 scope，仍计划在配置收敛与干净交付阶段处理 |
+| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
+| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
+| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 未解决：R1-4 不扩 scope，仍计划在配置收敛与干净交付阶段处理 |
 
-## 九、阶段边界
+## 十、阶段边界
 
 ### R1
 
 按独立小任务迁移 Provider 并统一事实与展示，不做一次性大重构或大规模删除。
 R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-3 已依据
-本机 live probe 迁移 AO Codex Worker harness/model。下一任务为 R1-4：统一真实
-架构文档、README 和前端拓扑表述。目标：
+本机 live probe 迁移 AO Codex Worker harness/model，R1-4 已统一 Panel、schema、
+当前架构文档、README 和前端拓扑。R1 已完成，结果为：
 
 - `MissionController` 唯一控制平面；
 - `StateStore` 唯一 CL-AO 状态源；
 - Bus 改为 Event Projection；
 - 前端拓扑区分逻辑角色与真实物理调用；
-- README、架构文档、代码注释一致。
+- 当前 README、架构文档与前端展示一致；兼容/历史代码注释保留并明确分类；
 - Planner/Auditor/Verifier 共享一个 ephemeral、read-only、结构化输出的 Codex CLI 调用边界；
 - Worker 使用经本机 live probe 验证的 AO Codex harness/model 参数。
 
@@ -217,10 +237,10 @@ R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-R1-1、R1-2、R1-3 已完成；下一独立任务为 R1-4：统一真实架构文档、
-README 和前端拓扑表述，完成 R1 收尾。
+R1-1、R1-2、R1-3、R1-4 已完成。下一独立任务为 R2-1：生成主路径引用图并
+收敛第一组重复实现；删除前仍必须提供入口、import、运行路径和测试证据。
 
-## 十、停止条件
+## 十一、停止条件
 
 出现以下任一情况立即停止当前任务并报告：
 

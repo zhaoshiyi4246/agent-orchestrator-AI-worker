@@ -1,109 +1,124 @@
-# 闭环多智能体系统 — 组员交付包
+# 闭环多智能体系统 v0.2 — 交付说明
 
-本文件夹是项目交付件,用于组内讨论与复现。只包含可运行源码、仓库与项目文档;
-运行历史日志、缓存、虚拟环境、安装包等已剔除。
+本目录用于组内讨论、验证和后续收敛。`closed-loop-v2/` 是当前 v0.2 主产品
+候选；`clao-src/` 与 `ao-supervision-sidecar/` 是历史来源和参考实现，
+不是并行的正式运行入口。
 
-## 1. 这是什么
+当前权威架构是仓库根目录的 `docs/PROJECT.md`；本目录的
+`ARCHITECTURE-v0.2.md` 与其保持一致。
 
-一个有界循环、人工兜底的多智能体控制系统:
-确定性程序做检测(Observer / Integration Gate),语义判断由 Agent 做
-(Planner 唯一决策者 / Auditor 只读审计 / Verifier 独立验证),Worker 按需孵化。
-用户可在 Web 面板(端口 7100)对任意 agent 下指令。
+## 当前产品边界
 
-权威设计基线:**`ARCHITECTURE-v0.2.md`**(角色、通道、协议、不变量以此为准)。
+AO 负责 Project、Session、Conversation、Agent Runtime、worktree 和 PR/SCM。
+本项目在 AO 之上提供唯一的 `MissionController` 控制平面、唯一的
+`StateStore` 运行状态源、Observer、Auditor、Planner、Verifier、Integration
+Gate、Worker 编排和 UI 时间线。
 
-## 2. 目录结构
-
-```
-ARCHITECTURE-v0.2.md          权威设计基线(讨论第一份要看)
-PV-独立验证任务.md            独立产品验证任务书(验收口径)
-AO_UPGRADE_CHECKLIST.md        AO 版本升级验收流程
-ao-openapi-diff.py            两版 OpenAPI 契约自动对比工具
-
-closed-loop-v2/               ★ 主项目本体(v0.2 整合版,最终交付与运行对象)
-  src/loopcore/               核心代码:bus / envelope / mission / observer /
-                              auditor / verifier / planner / ao_adapter ...
-  panel/                      控制台后端 server.py + 单页前端 index.html (7100)
-  prompts/                    角色契约提示词(Planner/Auditor/Verifier)
-  config/default.yaml         阈值与模型配置
-  schemas/                    事件/告警/消息 JSON Schema
-  tasks/                      mission 任务定义(mission-quick*.json)
-  run_mission.py              一命令跑完整 mission 的 CLI
-  启动面板.bat                 双击启动 Web 面板
-  README.md                   项目自述
-  tests/                      单元测试(PV 任务书称 247 passed)
-
-clao-src/clao-v0.1.0/         上游控制层(CLAO,组员编写;v2 继承其
-                              observer/ao_client/protocol/integration_gate)
-
-ao-supervision-sidecar/       上游产品化能力(事件归一化/告警规则;
-                              v2 继承其 event_normalizer/fingerprints)
-
-closed-loop-demo/             演示目标仓库(app.py/math2.py;闭环对其执行
-                              pytest 并合并 master)
-closed-loop-demo-origin.git/  demo 的裸 origin(闭环 git push/pull 用)
+```text
+Panel / run_mission
+  → MissionController
+    → Planner / Auditor / Verifier（headless Codex CLI）
+    → Observer / Gate（确定性程序）
+    → ActionExecutor / AOAdapter → AO Codex Worker
+    ↔ StateStore
+  → StoreBusProjector → JSONL / Markdown / UI Timeline
 ```
 
-## 3. 运行前提(组员需自备)
+`LoopBus` 是 Store 后置事件投影和审计展示，不是控制总线，也不是唯一 AO
+传输层。用户指令经 `Panel → DirectiveChannel → MissionController` 消费；
+发给 Worker 的真实指令再由 `ActionExecutor → AO` 投递。
 
-1. **Python 3.12+**,自建虚拟环境:
-   ```bash
-   cd closed-loop-v2
-   python -m venv .venv
-   .venv/Scripts/activate            # Windows
-   pip install httpx pyyaml pytest
-   ```
-   仅这两个第三方依赖,其余为标准库。
+## 当前角色契约
 
-2. **Agent Orchestrator (AO) daemon** 运行于 `http://127.0.0.1:3001`。
-   AO 桌面端不随包交付(体积 ~450M),请自行安装:
-   见 `AO_UPGRADE_CHECKLIST.md` 第 1 步,从 GitHub release 下载安装包。
+| 角色或程序 | 当前形态 |
+|---|---|
+| Planner | 项目级唯一；headless Codex CLI；默认 `gpt-5.6-sol`；不直接编辑代码 |
+| Auditor | 只读语义审计；headless Codex CLI；默认 `gpt-5.6-sol`；只向 Planner 提交结果 |
+| Verifier | 独立只读复核；headless Codex CLI；默认 `gpt-5.6-sol`；当前在子任务 Gate 后和 Mission 终局调用 |
+| Worker | AO Chat-mode Codex Worker；harness=`codex`；model=`gpt-5.6-sol` |
+| Observer | 确定性程序；无模型 |
+| Integration Gate | 确定性程序；无模型 |
 
-3. **claude CLI**(headless)在 PATH 中 —— Planner/Auditor/Verifier 通过它调用 LLM。
+Auditor、Verifier 和 Observer 都不直接向 Worker 下发自动执行指令。当前系统
+仍允许多个子任务；默认单 Worker、按需第二 Worker，以及终局/高风险才调用
+Verifier，是 R3 的后续目标。
 
-## 4. 快速跑起来
+## 目录结构
 
-```bash
+```text
+ARCHITECTURE-v0.2.md          v0.2 当前架构说明
+PV-独立验证任务.md            历史独立产品验证任务书
+AO_UPGRADE_CHECKLIST.md       AO 版本升级验收流程
+ao-openapi-diff.py            OpenAPI 契约对比工具
+
+closed-loop-v2/               当前主产品候选
+  src/loopcore/               Mission、Store、AO 边界、Observer、Gate、Provider
+  panel/                      server.py + index.html，本地 Web 面板（7100）
+  prompts/                    Planner/Auditor/Verifier 角色契约
+  config/default.yaml         当前运行配置
+  schemas/                    JSON Schema
+  tasks/mission-quick.json    当前 Codex dry-run 示例
+  run_mission.py              CLI 与运行时组装入口
+  启动面板.bat                 面板启动入口
+  tests/                      v0.2 自动化测试
+
+clao-src/                     历史来源与参考实现
+ao-supervision-sidecar/       历史来源与参考实现
+closed-loop-demo/             演示目标仓库
+closed-loop-demo-origin.git/  演示 bare origin
+```
+
+R2 完成调用关系证明前，不删除历史来源目录或旧兼容模块。
+
+## 当前已实现与后续事项
+
+当前已实现：
+
+- Panel 发起 Mission；
+- Planner 自动分解；
+- Panel/CLI 的 AO Codex Worker 执行；
+- Observer 确定性观察；
+- Auditor → Planner 闭环；
+- Integration Gate 和当前 Verifier；
+- StateStore 恢复、stop/resume；
+- UI 时间线与派生的 Markdown/JSONL。
+
+仍待后续：
+
+- R2 的重复模块和旧入口清理；
+- R3 的默认单 Worker、按需第二 Worker 和 Verifier 调用策略；
+- R4 的任意 AO Project 选择、配置接线和自动审批权限；
+- R5 的 AO 路径/安装可移植性、CI 和干净交付。
+
+AO Desktop 不随源码目录作为一个安装包交付。当前环境仍含本机 AO 路径假设，
+不能宣称任意电脑解压即可运行。
+
+## 本地验证
+
+已验证基线使用 Python 3.12、本地 `.venv`、独立安装并运行的 AO Desktop，
+以及已通过 ChatGPT 登录的 Codex CLI。
+
+```powershell
 cd closed-loop-v2
-# 1. 单元测试(PV 任务书称应 247 passed)
-set PYTHONPATH=src && python -m pytest tests/ -q
+$venvScripts = (Resolve-Path ".\.venv\Scripts").Path
+$env:PATH = "$venvScripts;$env:PATH"
+$env:PYTHONPATH = (Resolve-Path ".\src").Path
 
-# 2. Web 面板
-.\.venv\Scripts\python.exe panel\server.py
-#   或双击 启动面板.bat,然后浏览器开 http://127.0.0.1:7100/
-
-# 3. CLI 跑一个 mission(dry-run 不碰 AO)
-set PYTHONPATH=src && python run_mission.py tasks/mission-quick.json --dry-run
-#   真实跑(需 AO daemon 在线)
-set PYTHONPATH=src && python run_mission.py tasks/mission-quick.json
+.\.venv\Scripts\python.exe -m pytest .\tests -q
+.\.venv\Scripts\python.exe -m compileall -q .\src .\panel .\run_mission.py
+.\.venv\Scripts\python.exe .\run_mission.py .\tasks\mission-quick.json --dry-run
 ```
 
-## 5. 已剔除的内容(非项目源码)
+`--dry-run` 是 Planner 分解预检：它会调用真实 Codex Planner，但不连接 AO、
+不创建 Worker、不创建 StateStore 或 runtime。真实运行还需要 AO daemon 在线，
+且目标 Project 已在 AO 注册。
 
-- `ao-app/`、`ao-app-0.12.7-backup/` — AO 桌面端本体与旧版备份(各自安装)
-- `ao-data/` — 本机 AO 运行时数据(各成员自有)
-- `ao-smoke-test*/`、`tools/` — 早期联调 smoke 测试仓、7z 工具
-- `pv_start.py` / `pv_spawn_probe.py` / `pv-s3-mission.json` — PV 验证探针脚本
-- 各处 `.venv/`、`__pycache__/`、`.pytest_cache/`、`*.pyc`
-- `closed-loop-v2/runtime/` — 任务运行历史(per-mission SQLite + 日志)
-- `closed-loop-v2/tasks/mission-panel-*.json` — 面板自动生成的任务存档
-- `ao-supervision-sidecar/runtime/` — sidecar 运行历史
-- `ao-supervision-sidecar/tools_*.py` — 审计探针(sidecar README 标注可删)
-- AO 安装包、OpenAPI 契约快照、启动日志、NVIDIA 日志
+当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。
 
-## 6. 关于测试目录(请确认)
+## 不作为源码交付的内容
 
-按"排除测试垃圾"的口径,以下单元测试**当前仍保留**,因为它们是项目的一部分、
-且是 PV 任务书"247 passed"的验证依据:
-- `closed-loop-v2/tests/`(主项目)
-- `ao-supervision-sidecar/tests/`
-- `clao-src/clao-v0.1.0/tests/`
-
-其中 `closed-loop-demo/tests/` **必须保留** —— 它是演示仓库自带的 pytest,
-闭环运行时正是对它执行测试,删掉演示就跑不起来。
-
-如需把上面三个单元测试目录一并剥离(只留可运行代码),在包根目录执行:
-```bash
-rm -rf closed-loop-v2/tests ao-supervision-sidecar/tests clao-src/clao-v0.1.0/tests
-```
-```
+- AO Desktop 安装目录与 AO 用户数据；
+- 真实 Session、Conversation、凭据、Cookie 和日志；
+- `.venv/`、`__pycache__/`、`.pytest_cache/`；
+- `closed-loop-v2/runtime/` 及面板生成的任务存档；
+- 历史 worktree、运行数据库和本机缓存。
