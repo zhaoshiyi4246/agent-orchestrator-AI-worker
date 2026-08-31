@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R2 — 重复实现与旧入口收敛
-- 当前任务：R1-4 — 架构、README、前端拓扑与 Panel Worker 契约统一（已完成）
-- 当前状态：R1 已完成；生产 Codex 契约、当前文档与展示已统一
-- 下一步：R2-1 — 生成主路径引用图并收敛第一组重复实现
+- 当前任务：R2-0 — AO 主运行路径可移植性修复（已完成）
+- 当前状态：E2E preflight 已将 K18 升级为当前 blocker；主运行路径修复及 live portability probe 已通过
+- 下一步：先运行一次完整真实 E2E Mission smoke；E2E PASS 后再进入 R2-1
 
 ## 一、更新规则
 
@@ -30,7 +30,7 @@
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
-| R2 | 重复模块、旧入口和参考代码收敛 | 进行中（R2-1 待开始） |
+| R2 | AO 主路径可移植性、重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；完整 E2E smoke 待运行） |
 | R3 | Worker 数量、Verifier、issue/thread 与控制语义收敛 | 未开始 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
@@ -160,10 +160,36 @@ K16 完全解决。R1 下一独立任务为 R1-4，不直接进入 R2。
 | 视觉 QA 边界 | 本地 Panel 服务可启动；当前会话无可用内置/扩展浏览器实例，因此未执行截图式浏览器视觉检查 |
 
 R1-4 关闭结论：生产入口、schema、当前文档和前端拓扑已经统一到真实 Codex
-运行契约；K1、K2、K13、K17 关闭，R1 完成。下一步进入 R2-1，不提前删除
-任何兼容模块或历史来源目录。
+运行契约；K1、K2、K13、K17 关闭，R1 完成。R1-4 结束时原计划下一步进入
+R2-1；随后 E2E preflight 将 K18 升级为 blocker，因此先插入 R2-0。任何兼容
+模块或历史来源目录仍未提前删除。
 
-## 九、已知问题清单
+## 九、R2-0 验收证据
+
+E2E preflight 证明 `run_mission.py` 的 AO executable、data root 和 runfile 三项
+开发机 E 盘硬编码在当前机器均不存在，因此 K18 从 R4/R5 后期可移植性问题升级为
+当前 E2E blocker。本任务只修主运行路径和 `auto_ff_master` 的最小导入兼容，不
+开始 R2-1，也不删除重复模块。
+
+| 项目 | 结果 |
+|---|---|
+| executable 解析 | `CLAO_AO_BIN` 优先，其次 `shutil.which("ao")`；两者均无时 fail fast，错误明确提示 `CLAO_AO_BIN`；不扫描磁盘、注册表或安装目录 |
+| runfile 解析 | `CLAO_AO_RUN_FILE` 优先，否则使用 `Path.home() / ".ao" / "running.json"`；不再以 `AO_DATA_DIR/ao.run` 作为生产默认 |
+| endpoint 与 timeout | 有效 runfile port 优先，其次显式 `ao.base_url`，最后 `http://127.0.0.1:3001`；`ao.request_timeout_seconds` 已传给 `AOAdapter` |
+| 共享运行时组装 | Panel 与 CLI 继续共用 `build_runtime()`；每次构造只解析一份 `ao_bin/run_file`，同一结果传给 `AOAdapter` 与 `ActionExecutor` |
+| Executor 环境 | 生产组装不再传入开发者 data root；`ActionExecutor` 不再无条件设置 `AO_DATA_DIR`，仅在明确 runfile 存在时设置 `AO_RUN_FILE` |
+| `auto_ff_master` | 默认仍关闭且 Git/push 行为未重构；仅显式 `CLAO_AO_DATA_DIR` 可启用 legacy worktree 推导，未设置时明确拒绝，继续归 R4 审计 |
+| 直接回归 | AO portability、runtime 组装、Panel/CLI 共享路径及既有 Worker spawn/model 回归：`42 passed` |
+| 完整离线测试 | `pytest tests -q`：`307 passed in 32.56s`，退出码 0 |
+| 语法检查 | `python -m compileall -q src panel run_mission.py`，退出码 0 |
+| live portability probe | AO Desktop `0.12.9`；本机 executable 仅通过未提交的进程级 `CLAO_AO_BIN` 输入；未设置 `CLAO_AO_RUN_FILE`，默认 runfile 存在并解析到端口 `3001`；`AOAdapter.get_projects()` 成功返回 2 项；Executor 调用 `ao status --json` 退出 0、状态 `ready`；未创建 Worker |
+| 路径复扫 | `run_mission.py` 已无开发机绝对路径；当前机器 executable 路径未进入 Git；旧 AO Client/CLI、`llm_env.py`、worktree 兼容逻辑和测试夹具中的抽象/合成路径保留待 R2/R4 审计 |
+
+R2-0 关闭结论：K18 的生产主路径已解决；`auto_ff_master` 和兼容/历史遗留仍归
+R4/R2。当前下一步不是 R2-1，而是先运行一次完整真实 E2E Mission smoke；只有
+E2E PASS 后才进入 R2-1。
+
+## 十、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
 |---|---|---|---|
@@ -176,16 +202,16 @@ R1-4 关闭结论：生产入口、schema、当前文档和前端拓扑已经统
 | K7 | issue fingerprint 包含 source | R3 | 已确认：`issue_fingerprint()` 返回值显式包含 `source` |
 | K8 | thread 缺少 revision 裁决语义 | R3 | 已确认：同一 issue 只允许一次 verdict，没有 revision 字段或重裁决路径 |
 | K9 | 多套状态与投影没有明确主从 | R1/R2 | 已解决：代码与当前文档均明确 StateStore/AO Worker 事实与后置投影关系；R2 只处理重复实现 |
-| K10 | 配置项重复、未接线或 UI/后端语义不同 | R4 | 已确认：`roles.*`、`roles.max_parallel_workers`、`ao.base_url` 等未被当前组装路径完整消费 |
+| K10 | 配置项重复、未接线或 UI/后端语义不同 | R4 | 部分解决：R2-0 已接入 `ao.base_url` 与 `ao.request_timeout_seconds`；`roles.*`、`roles.max_parallel_workers` 等其余配置仍待 R4 收敛 |
 | K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
 | K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已解决：清理永久冻结数字；R1-3 main 基线为 295，R1-4 实跑 296，以后以 CI/当前输出为准 |
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 未解决：R1-4 不扩 scope，仍计划在配置收敛与干净交付阶段处理 |
+| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R2-0/R4/R2 | 主路径已解决；`auto_ff_master`/compat 遗留仍归 R4/R2：生产入口不再含开发机 AO 路径，`llm_env.py` 与旧入口待引用审计 |
 
-## 十、阶段边界
+## 十一、阶段边界
 
 ### R1
 
@@ -204,7 +230,9 @@ R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-
 
 ### R2
 
-先生成调用关系，再每次只收敛一组重复实现。删除前必须有测试和入口证据。
+R2-0 已先修复真实 E2E preflight 暴露的 AO 主路径可移植性 blocker。下一步先做
+完整真实 E2E Mission smoke；通过后再开始 R2-1，生成调用关系并每次只收敛一组
+重复实现。删除前必须有测试和入口证据。
 
 ### R3
 
@@ -238,10 +266,11 @@ R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-R1-1、R1-2、R1-3、R1-4 已完成。下一独立任务为 R2-1：生成主路径引用图并
-收敛第一组重复实现；删除前仍必须提供入口、import、运行路径和测试证据。
+R1-1、R1-2、R1-3、R1-4 与 R2-0 已完成。下一步先运行完整真实 E2E Mission
+smoke；E2E PASS 后才开始 R2-1，生成主路径引用图并收敛第一组重复实现；删除前
+仍必须提供入口、import、运行路径和测试证据。
 
-## 十一、停止条件
+## 十二、停止条件
 
 出现以下任一情况立即停止当前任务并报告：
 

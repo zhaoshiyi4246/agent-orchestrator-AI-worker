@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -41,19 +42,48 @@ from loopcore.planner_adapter import CodexCliPlannerProvider       # noqa: E402
 from loopcore.state_store import StateStore                  # noqa: E402
 from loopcore.verifier import CodexCliVerifierProvider       # noqa: E402
 
-AO_BIN = r"E:\智理杯智能体大赛\ao-app\resources\daemon\ao.exe"
-AO_DATA_DIR = r"E:\智理杯智能体大赛\ao-data"
-AO_RUN_FILE = str(Path(AO_DATA_DIR) / "ao.run")
+
+def resolve_ao_bin(*, environ=None, which=None) -> str:
+    """Resolve the external AO CLI without assuming a machine layout."""
+    env = os.environ if environ is None else environ
+    configured = str(env.get("CLAO_AO_BIN") or "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_file():
+            raise RuntimeError(
+                "CLAO_AO_BIN does not point to an AO executable file: %s"
+                % configured)
+        return str(path)
+
+    finder = shutil.which if which is None else which
+    discovered = finder("ao")
+    if discovered:
+        return str(discovered)
+    raise RuntimeError(
+        "AO executable not found; set CLAO_AO_BIN to the installed AO CLI "
+        "or make 'ao' available on PATH")
 
 
-def setup_environment() -> None:
+def resolve_ao_run_file(*, environ=None, home=None) -> Path:
+    """Resolve AO's daemon runfile from the portable public contract."""
+    env = os.environ if environ is None else environ
+    configured = str(env.get("CLAO_AO_RUN_FILE") or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    home_dir = Path.home() if home is None else Path(home)
+    return home_dir / ".ao" / "running.json"
+
+
+def setup_environment(*, ao_run_file: Path | str | None = None) -> None:
     """Process-level env every entry point needs (CLI, panel, scripts).
 
-    This only configures AO daemon discovery and the venv-first PATH for the
-    integration gate. Codex role providers do not use llm_env.
+    AO Desktop remains an external dependency and is never started here.  A
+    resolved runfile may be published for compatibility with AO consumers;
+    no developer-specific AO data directory is injected.  Codex role
+    providers do not use llm_env.
     """
-    os.environ.setdefault("AO_DATA_DIR", AO_DATA_DIR)
-    os.environ.setdefault("AO_RUN_FILE", AO_RUN_FILE)
+    if ao_run_file is not None:
+        os.environ["AO_RUN_FILE"] = str(ao_run_file)
     # the mission gate runs `python -m pytest` argv-style: make sure the
     # venv python (with pytest) wins PATH resolution.
     venv_scripts = str(ROOT / ".venv" / "Scripts")
@@ -85,17 +115,25 @@ def build_planner(cfg: dict, *, timeout: int = 180,
 class MissionRuntime:
     """Everything a running (or resumable) mission is made of."""
 
-    def __init__(self, mission_dict: dict, cfg: dict, *, dry_run: bool = False):
+    def __init__(self, mission_dict: dict, cfg: dict, *, ao_bin: str,
+                 ao_run_file: Path, dry_run: bool = False):
         self.mission_dict = mission_dict
         self.cfg = cfg
         self.dry_run = dry_run
+        self.ao_bin = ao_bin
+        self.ao_run_file = str(ao_run_file)
         self.runtime = ROOT / "runtime" / mission_dict["mission_id"]
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.store = StateStore(str(self.runtime / "state.db"))
-        self.adapter = AOAdapter()
+        ao_cfg = cfg.get("ao") or {}
+        self.adapter = AOAdapter(
+            base_url=ao_cfg.get("base_url") or "http://127.0.0.1:3001",
+            timeout=float(ao_cfg.get("request_timeout_seconds", 15)),
+            run_file=ao_run_file)
+        self.ao_base_url = self.adapter.base_url
         wcfg = cfg.get("worker") or {}
         self.executor = ActionExecutor(
-            ao_bin=AO_BIN, data_dir=AO_DATA_DIR, run_file=AO_RUN_FILE,
+            ao_bin=ao_bin, data_dir=None, run_file=str(ao_run_file),
             store=self.store,
             worker_model=wcfg.get("model", ""),
             max_spawn_attempts=int(wcfg.get("spawn_max_attempts", 3)),
@@ -157,7 +195,12 @@ class MissionRuntime:
 
 def build_runtime(mission_dict: dict, cfg: dict, *,
                   dry_run: bool = False) -> MissionRuntime:
-    return MissionRuntime(mission_dict, cfg, dry_run=dry_run)
+    ao_bin = resolve_ao_bin()
+    ao_run_file = resolve_ao_run_file()
+    setup_environment(ao_run_file=ao_run_file)
+    return MissionRuntime(
+        mission_dict, cfg, ao_bin=ao_bin, ao_run_file=ao_run_file,
+        dry_run=dry_run)
 
 
 def run_loop(rt: MissionRuntime, *, cap_seconds: float = 300.0,
