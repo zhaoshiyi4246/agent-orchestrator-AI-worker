@@ -13,7 +13,14 @@
     },
     "target_session_id": {"type": ["string", "null"]},
     "message": {"type": "string"},
-    "replacement_task_spec": {"type": ["object", "null"]},
+    "replacement_task_spec": {
+      "type": ["object", "null"],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1}
+      },
+      "required": ["objective"],
+      "additionalProperties": false
+    },
     "reason": {"type": "string"},
     "plan": {"type": "string"}
   },

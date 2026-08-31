@@ -2,7 +2,7 @@
 
 - 当前阶段：R1 — Provider 迁移与架构事实统一
 - 当前任务：R1-1 — 迁移 Planner Provider 并恢复 planning dry-run
-- 当前状态：R1-1 已完成，R1 继续进行
+- 当前状态：R1-1 已完成审计修复与真实 REPLAN 验证，R1 继续进行
 - 下一步：R1-2 — 在独立任务中迁移 Auditor 和 Verifier，复用已验证的
   Codex CLI 调用边界
 
@@ -91,17 +91,18 @@ Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run �
 | 项目 | 结果 |
 |---|---|
 | 共享调用边界 | 新增 `loopcore.codex_cli.run_codex_json()`；stdin 传入 prompt，使用 `codex exec --ephemeral --sandbox read-only --model ... --output-schema ... --output-last-message ... -`，只解析临时最终消息文件并要求 JSON object；无共享层重试 |
-| schema 兼容 | 保留并读取现有 PlannerAction/MissionPlan schema；runner 仅为 Codex structured output 派生调用期严格 transport 副本，调用结束清理；原 schema 与后续本地 validator 均未修改或绕过 |
+| schema 兼容 | PlannerAction schema 明确定义可空 `replacement_task_spec.objective`；runner 派生调用期严格 transport 副本并在调用结束清理，遇到允许 object 却未声明 `properties` 的 schema 会在 subprocess 前失败；本地 validator 未绕过 |
 | 生产 Planner | `CodexCliPlannerProvider` 已替换 Claude 实现；默认模型 `gpt-5.6-sol`，由 `roles.planner.model` 覆盖；`plan()` 两次失败后返回 HUMAN，`plan_decompose()` 两次失败后抛出并由 Controller 边界转 HUMAN |
 | planning dry-run | `run_mission.py --dry-run` 只解析 Mission、创建 Codex Planner 并输出 MissionPlan；不组装 MissionRuntime/StateStore/AO/Worker/Auditor/Verifier/Gate/LoopBus |
-| 离线测试 | `pytest tests -q`：271 项全部通过；退出码 0 |
+| 离线测试 | `pytest tests -q`：278 项全部通过；退出码 0 |
 | 语法与 diff | `compileall -q src panel run_mission.py` 与 `git diff --check` 均退出 0 |
 | live Planner | `codex-cli 0.150.1`、ChatGPT 登录、`gpt-5.6-sol`；`mission-quick.json --dry-run` 最终退出 0，mission_id 匹配，生成 2 个子任务（既有范围 2..2），输出通过 structured schema 与本地 validator |
+| live REPLAN | 单次真实 `plan()` probe 使用 REPLAN Audit、`remaining_replans=1` 与虚拟 session；Codex 退出 0，返回匹配 action_id/task_id 的 `REPLAN_SPAWN`，`replacement_task_spec.objective` 非空且 PlannerAction 本地 validator 通过 |
 | live 副作用 | 未连接 AO、未创建 Worker、未创建或更新 runtime/state；既有 `runtime/MISSION-QUICK-001` 文件时间与 SHA-256 均保持不变 |
 
-R1-1 关闭结论：共享 Codex runner、生产 Planner 迁移和无 AO 副作用的
-planning dry-run 已通过离线与 live 验证。Auditor、Verifier 和 AO Worker 尚未
-迁移，进入 R1-2 及后续独立任务。
+R1-1 关闭结论：共享 runner、Planner 迁移、planning dry-run 及 REPLAN payload
+审计修复均已通过离线与真实 Codex 验证。Auditor、Verifier 和 AO Worker 尚未
+迁移，下一独立任务仍为 R1-2。
 
 ## 六、已知问题清单
 

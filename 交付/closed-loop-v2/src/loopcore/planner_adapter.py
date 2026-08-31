@@ -178,6 +178,16 @@ class CodexCliPlannerProvider(PlannerProvider):
                 obj.setdefault("task_id", audit.task_id)
                 _coerce_planner_strings(obj)
                 ok, msg = validate_planner_action(obj)
+                if obj.get("action") == PlannerActionType.REPLAN_SPAWN:
+                    replacement = obj.get("replacement_task_spec")
+                    objective = replacement.get("objective") \
+                        if isinstance(replacement, dict) else None
+                    if not isinstance(objective, str) or not objective.strip():
+                        ok = False
+                        msg = ("REPLAN_SPAWN requires replacement_task_spec."
+                               "objective to be a non-empty string")
+                    else:
+                        replacement["objective"] = objective.strip()
                 if ok:
                     return PlannerAction.from_dict(obj)
                 last_err = "schema: %s" % msg
