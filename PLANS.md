@@ -1,10 +1,10 @@
 # v0.2 修正计划
 
 - 当前阶段：R0 — 修正基线与项目上下文
-- 当前任务：初始化治理文件并确认真实基线；处理已发现的环境与远端阻塞
+- 当前任务：审计初始化 PR，并处理测试 PATH 与 dry-run 外部模型阻塞
 - 当前状态：进行中
-- 下一步：恢复 GitHub 连接、解决规定测试命令的 PATH 基线和 dry-run 的
-  headless Planner 依赖，再完成 R0 提交与 PR
+- 下一步：审计 PR #1，解决规定测试命令的 PATH 基线和 dry-run 的
+  headless Planner 依赖，再判断 R0 是否可以完成
 
 ## 一、更新规则
 
@@ -52,13 +52,13 @@ R0 只做基线，不修改产品行为。
 - [x] 运行 `run_mission.py ... --dry-run`（结果为 HUMAN，未成功完成）；
 - [x] 记录 Python 版本、测试数量、失败项和 dry-run 结果；
 - [x] 暂存区只包含治理文件和 `.gitignore`；
-- [ ] 创建面向 `main` 的 PR，不合并。
+- [x] 已创建面向 `main` 的 PR #1，保持未合并。
 
 ## 四、R0 真实基线
 
 | 项目 | 结果 |
 |---|---|
-| 仓库 HEAD | `b352714`；本地缓存的 `HEAD...origin/main` 为 `0 0`，但 `git fetch origin main` 因 GitHub 443 不可达而未取得新鲜远端证明 |
+| 仓库基线 HEAD | `b352714`；fresh fetch 后 `main...origin/main` 为 `0 0`，任务分支基于最新 `origin/main` |
 | Python | CPython `3.12.7`；本地环境 `交付/closed-loop-v2/.venv` |
 | 主测试命令 | `PYTHONPATH=src .\.venv\Scripts\python.exe -m pytest .\tests -q` |
 | 测试结果 | 收集 252 项：`251 passed, 1 failed`，165.17 s；失败为 `tests/sidecar_port/test_phase3.py::test_gate_pass` |
@@ -69,10 +69,10 @@ R0 只做基线，不修改产品行为。
 | 当前唯一控制平面 | 当前代码主路径为 `MissionController`；`LoopBus` 不参与状态迁移或 Agent 指令投递 |
 | 当前状态源 | CL-AO Mission/Task/预算/恢复为 SQLite `StateStore`；AO Snapshot 提供 Worker 事实；Bus、Markdown、JSONL 是后置投影 |
 | 已确认重复模块 | `ao_adapter/ao_client`、`event_observer/observer`、`mission_gate/integration_gate`、`mission_contracts/protocol`、四套 CLI；详见 `docs/PROJECT.md` |
+| 初始化 PR | `#1`，状态 OPEN，目标分支 `main`，未合并 |
 
 当前阻塞：
 
-- GitHub 443 不可达，无法完成 fresh fetch、push 和 PR；
 - 规定的完整测试命令有 1 项本地 PATH/解释器失败；
 - dry-run 仍依赖 headless Planner，且本机没有 `claude`，因此未完成成功 dry-run。
 
