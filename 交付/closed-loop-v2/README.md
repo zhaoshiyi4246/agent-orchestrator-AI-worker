@@ -1,24 +1,69 @@
 # closed-loop-v2
 
-闭环多智能体系统 v0.2 —— 整合 CL-AO v0.1 的严谨控制层与 ao-supervision-sidecar 的 mission 产品化能力。
+当前 v0.2 主产品候选。权威架构见仓库根目录
+[`docs/PROJECT.md`](../../docs/PROJECT.md)，交付侧说明见
+[`../ARCHITECTURE-v0.2.md`](../ARCHITECTURE-v0.2.md)。
 
-权威设计基线：[`../ARCHITECTURE-v0.2.md`](../ARCHITECTURE-v0.2.md)。角色、通道、协议、不变量以该文档为准。
-
-## 结构
+## 运行路径
 
 ```text
-src/loopcore/
-  envelope.py          Loop Bus 消息信封、开放路由表、issueFingerprint 去重
-  ao_client.py         继承自 CL-AO：daemon 发现、Conversation 读写、幂等恢复
-  protocol.py          继承自 CL-AO：AuditRequest/AuditReport/PlannerDecision
-  observer.py          继承自 CL-AO：确定性 Observer（待合并 sidecar NO_PROGRESS 规则）
-  integration_gate.py  继承自 CL-AO：确定性 Integration Gate
-config/                阈值与模型配置（worker.model 等）
-prompts/               角色契约提示词（Planner/Auditor/Verifier/Worker）
-tests/                 离线测试（MockTransport，不访问真实网络）
-docs/                  实现证据与决策记录
+panel/server.py 或 run_mission.py
+  → 共用 build_runtime()
+  → MissionController（唯一控制平面）
+  ├─ CodexCliPlannerProvider
+  ├─ CodexCliAuditorProvider
+  ├─ CodexCliVerifierProvider
+  ├─ event_observer.Observer（无模型）
+  ├─ mission_gate.IntegrationGate（无模型）
+  ├─ ActionExecutor / AOAdapter → AO Codex Worker
+  └─ StateStore（唯一 CL-AO 运行状态源）
+       → StoreBusProjector → JSONL / Markdown / UI Timeline
 ```
 
-## 不变量速查
+Planner、Auditor、Verifier 使用 headless Codex CLI，默认模型均为
+`gpt-5.6-sol`。Worker 使用 AO Chat-mode `codex` harness，默认模型由
+`config/default.yaml` 的 `worker.model` 提供，同样为 `gpt-5.6-sol`。
 
-唯一 Planner；Observer/Gate 是程序不是 agent；Auditor 只读；所有消息幂等 fail-closed；每个 thread 有界、超限转 HUMAN；不使用 Codex。
+`LoopBus` 当前只承载 Store 后置事件投影、路由校验、审计时间线和 UI 展示；
+它不改变 Mission/Task 状态，也不负责真实 Agent 指令投递。Markdown、JSONL
+和前端缓存都是派生视图。
+
+## 主要目录
+
+```text
+run_mission.py             CLI 与统一运行时组装
+panel/server.py            Panel 后端，复用 build_runtime()
+panel/index.html           单页展示与真实控制/证据流拓扑
+src/loopcore/mission.py    MissionController
+src/loopcore/state_store.py
+src/loopcore/action_executor.py
+src/loopcore/bus_projector.py
+config/default.yaml
+schemas/
+prompts/
+tasks/mission-quick.json
+tests/
+```
+
+## 当前边界
+
+- 当前系统允许一个 Mission 拆分为多个子任务；默认单 Worker、按需第二 Worker
+  是 R3 目标。
+- Verifier 当前在每个子任务 Gate 后和 Mission 终局调用；终局/高风险按需调用
+  是 R3 目标。
+- 面板目前默认使用演示 Project；通用 AO Project 选择属于 R4。
+- AO 路径和安装尚未完全可移植，不能视为解压即用产品。
+
+## 验证
+
+```powershell
+$venvScripts = (Resolve-Path ".\.venv\Scripts").Path
+$env:PATH = "$venvScripts;$env:PATH"
+$env:PYTHONPATH = (Resolve-Path ".\src").Path
+
+.\.venv\Scripts\python.exe -m pytest .\tests -q
+.\.venv\Scripts\python.exe -m compileall -q .\src .\panel .\run_mission.py
+.\.venv\Scripts\python.exe .\run_mission.py .\tasks\mission-quick.json --dry-run
+```
+
+当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。

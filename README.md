@@ -1,136 +1,130 @@
-[README.md](https://github.com/user-attachments/files/31627080/README.md)
 # 闭环多智能体系统 v0.2
 
-> 基于 Agent Orchestrator（AO）的多智能体闭环开发系统 ——
-> **智能体自报完成 ≠ 项目真正完成。** 本系统在 AO 的 Agent 运行、会话、
-> worktree 与 PR 能力之上，增加一层独立的闭环控制层，让
-> Planner / Auditor / Observer / Verifier / Worker 五种角色以
-> 有界自治的方式协作完成真实编码任务。
+本项目是在 Agent Orchestrator（AO）之上运行的闭环软件开发控制层。AO 提供
+Project、Session、Conversation、Agent Runtime、worktree 和 PR/SCM 能力；
+本项目负责 Mission 编排、确定性观察、语义审计、受控 Worker 执行、集成门禁、
+恢复和 UI 展示。
 
----
+当前权威架构见 [`docs/PROJECT.md`](docs/PROJECT.md)。`交付/closed-loop-v2/`
+是当前 v0.2 主产品候选路径。
 
-## 1. 产品组成
-
-| 角色 | 数量 | 本质 | 职责 |
-|---|---|---|---|
-| Planner | 1（唯一） | LLM agent（Claude） | 接纳用户任务、拆解派发；根据审计/验证证据裁决 PASS / LOCAL_FIX / REPLAN / HUMAN；撰写 memory.md 与 project.md；最终向用户汇报 |
-| Auditor | 1（只读） | LLM agent（Claude） | 依据任务目标、验收条件与证据做语义审计；发现 Worker 卡住时介入纠错；大问题提交 Planner 裁决 |
-| Observer | 1 | **确定性程序**（非 agent） | 固定间隔轮询 AO；识别完成里程碑、重复失败、停滞；错误指纹首次出现即预警；预算消耗 80% 预警 |
-| Verifier / Integration Gate | 1 | **确定性程序** + LLM 复核 | 里程碑触发验证；代码合并后运行项目级测试，失败证据自动回传 Auditor / Planner / Worker |
-| Worker | ≥2（按需孵化） | LLM agent（GLM-5.2） | 接收 Planner 派发的任务与 LOCAL_FIX 局部修复指令，在 AO worktree 中真实编码 |
-
-**设计原则**：确定性判断由普通程序完成，语义判断才调用 LLM；不为"多智能体"堆叠角色；有界循环 + 超时 + 人工兜底。
-
-### 通道矩阵（两两关系精确设计）
-
-| 通道 | 方向 | 说明 |
-|---|---|---|
-| Planner ↔ Worker | 双向 | 派发任务 / 汇报进展、上报困难 |
-| Planner ↔ Auditor | 双向 | 审计请求 / 审计结论 |
-| Planner ↔ Verifier | 双向 | PV 任务派发 / 验证结论回传 |
-| Planner ↔ Observer | 双向 | 调整观察焦点 / 风险信号 |
-| Auditor ↔ Worker | 双向 | 纠错介入 / 主动上报 |
-| Auditor ↔ Observer | 双向 | 定向观察请求 / 触发证据 |
-| Worker ↔ Observer | 双向 | 状态备注 / 停滞提醒 |
-| Worker ↔ Verifier | 双向 | 验证请求 / 结果回传 |
-| **Auditor → Verifier** | **单向** | 验证结论出口唯一收敛到 Planner，防止监督方绕过裁决层 |
-| **Observer → Verifier** | **单向** | 同上 |
-
-用户可从面板指令栏向**任意一个** agent 直接下达指令：发给 Planner 的指令仅 Planner 可见；发给其他任何 agent 的指令，该 agent 与 Planner 均可见（前后端均已实现）。
-
----
-
-## 2. 系统要求
-
-| 依赖 | 说明 |
-|---|---|
-| Windows 10/11 x64 | 已在此平台完整验证 |
-| Python 3.10+（加入 PATH） | 运行闭环控制层；`安装.bat` 会自动创建虚拟环境 |
-| Node.js | Claude CLI 的运行时 |
-| Claude CLI | 位于 `%APPDATA%\npm\claude.cmd`，程序自动查找 |
-| Git Bash | Claude CLI 在 Windows 上的硬性依赖 |
-| 网络连接 | 调用模型 API（Planner/Auditor/Verifier 用 Claude，Worker 用 GLM-5.2，不使用 Codex） |
-
-## 3. 包内容
+## 当前真实架构
 
 ```text
-最终交付成果/
-├─ README.md                ← 本文件
-├─ 安装.bat                 ← 一键安装闭环控制层依赖并自检
-├─ 启动AO.bat               ← 一键启动 AO（自动使用本包预配置数据）
-├─ requirements.txt
-├─ ao-app/                  ← Agent Orchestrator 桌面应用（底层运行平台）
-├─ ao-data/                 ← AO 预配置数据（网关模型、demo 项目注册）
-├─ closed-loop-v2/          ← 闭环控制层（本产品本体）
-│   ├─ 启动面板.bat         ← 一键启动可视化控制台
-│   ├─ panel/               ← Web 控制台（前端 + 服务）
-│   ├─ src/loopcore/        ← 闭环核心（Bus/Observer/Gate/协议……）
-│   ├─ config/default.yaml  ← 全部可调参数（角色模型、时间阈值……）
-│   ├─ prompts/             ← 角色契约提示词
-│   ├─ tests/               ← 272 项离线测试
-│   └─ docs/ARCHITECTURE-v0.2.md  ← 权威设计基线
-└─ demo/
-    ├─ closed-loop-demo/          ← 示例项目仓库
-    └─ closed-loop-demo-origin.git ← 示例远程仓库（供 AO worktree/PR 流程）
+Web Panel / run_mission
+        ↓
+MissionController（唯一控制平面）
+        ├─ Planner Provider
+        ├─ Auditor Provider
+        ├─ Verifier Provider
+        ├─ Deterministic Observer
+        ├─ Integration Gate
+        ├─ AOAdapter / ActionExecutor
+        └─ Worker / merge orchestration
+        ├─↔ StateStore
+        └─↔ AO
+
+StateStore
+        ↓
+StoreBusProjector / JSONL / Markdown / UI Timeline
 ```
 
-## 4. 安装与启动（三步）
+- `MissionController` 是唯一控制平面。
+- `StateStore` 是 CL-AO Mission、Task、预算、裁决和恢复的唯一运行状态源。
+- AO 的公开 Session、Conversation、activity 和 workspace 快照是 Worker
+  运行事实源。
+- `LoopBus` 当前用于事件 Envelope 投影、审计轨迹和 UI 时间线，不改变
+  Mission/Task 状态，也不承担 Agent 指令的真实投递。
+- Markdown、JSONL、Bus traffic 和前端拓扑都是派生视图，不参与恢复或裁决。
 
-1. **安装**：双击 `安装.bat`（首次约 1–3 分钟：建虚拟环境 → 装依赖 → 跑 272 项自检）。
-2. **启动 AO**：双击 `启动AO.bat`，等待 AO 桌面窗口出现（守护进程监听 `127.0.0.1:3001`）。
-3. **启动控制台**：双击 `closed-loop-v2\启动面板.bat`，浏览器自动打开 `http://127.0.0.1:7100`。
+用户指令的真实路径是：
 
-> 日常使用时安装只需一次；之后每次使用执行第 2、3 步即可。
+```text
+Panel → DirectiveChannel → MissionController
+Worker 指令：MissionController → ActionExecutor → AO
+```
 
-## 5. 快速开始：跑一个真实任务
+## 当前角色与运行形态
 
-1. 在面板顶部表单中填写：
-   - **项目**：`closed-loop-demo`（AO 中已预注册）
-   - **任务目标**：例如 `为 math2.py 增加 clamp01(x) 函数，将输入钳制到 [0,1]`
-   - **验收条件**：每行一条，例如 `clamp01(1.5) == 1`、`clamp01(-0.2) == 0`
-   - **Gate 命令**：默认 `python -m pytest -q`（项目级测试，合并后强制运行）
-   - **最大子任务数**：默认 2（对应 2 个 Worker 并行上限）
-2. 点击开始，观察：
-   - **拓扑图**：Planner / Auditor / Observer / Verifier / Worker 节点与通道实时连线（Worker 按实际孵化数量动态绘制）
-   - **事件流**：Observer 触发、审计结论、Planner 裁决、Gate 结果逐条滚动
-   - **指令栏**（底部固定）：选择任一 agent 直接下达或修改指令
-   - **memory.md / project.md**：Planner 实时撰写的项目记忆与重大事项进展，面板可直接查看
-3. 任务结束时由 **Planner 汇总结论并报告给用户**；失败/超限自动转人工兜底，不会死循环。
+| 角色或程序 | 当前运行形态 | 默认模型 | 当前职责 |
+|---|---|---|---|
+| Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 自动拆解、接收证据并裁决；不直接编辑代码 |
+| Auditor | 1 个只读 headless Codex CLI Provider | `gpt-5.6-sol` | 语义审计，只向 Planner 提交结果，不直接控制 Worker |
+| Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 当前在子任务 Gate 后和 Mission 终局复核，只输出验证结果 |
+| Worker | AO Chat-mode Codex Worker，harness=`codex` | `gpt-5.6-sol` | 在 AO worktree 中执行边界明确的编码任务 |
+| Observer | 确定性程序 | no model | 从 AO 事实产生触发和证据 |
+| Integration Gate | 确定性程序 | no model | 运行显式 argv 门禁并记录稳定证据 |
 
-### 时间参数（用户可精确调控，输入多久就是多久）
+当前系统允许一个 Mission 拆出多个子任务；“默认 1 个 Worker、确有独立并行收益
+时最多 2 个”是 R3 的收敛目标，不是当前实现不变量。Verifier 当前仍用于每个
+子任务 Gate 后和 Mission 终局；“只在终局/高风险调用”同样是 R3 目标。
 
-面板或 `config/default.yaml` 中可调：
+## 当前已经实现
 
-| 参数 | 默认值 | 含义 |
-|---|---|---|
-| `observer.interval_seconds` | **10 s** | Observer 轮询间隔（推荐 10 s） |
-| `auditor.audit_interval_seconds` | **300 s（5 分钟）** | 例行审计节奏（推荐 5 分钟；有触发时立即审计） |
-| `observer.stall_threshold_seconds` | 300 s | 停滞判定阈值 |
-| `bus.overall_timeout_seconds` | 600 s | 单任务总体超时，超限转人工 |
+- Panel 发起 Mission，CLI 与 Panel 复用同一运行时组装路径；
+- Planner 自动分解；
+- AO Codex Worker 执行，Panel 与 CLI 均使用 `codex` harness；
+- Observer 确定性观察；
+- Auditor 向 Planner 提交审计结果并形成闭环；
+- Integration Gate 和当前 Verifier；
+- StateStore 持久化及恢复；
+- stop/resume；
+- Store 后置事件投影和 UI 时间线。
 
-## 6. 故障排查
+## 后续阶段
 
-| 现象 | 处理 |
-|---|---|
-| 面板提示连不上 AO | 确认已通过 `启动AO.bat` 打开 AO 桌面窗口，且 `127.0.0.1:3001` 可访问 |
-| Worker 孵化失败 / claude 找不到 | 确认 Claude CLI 在 `%APPDATA%\npm\claude.cmd`，且已安装 Git Bash |
-| Gate 超时 | 调大 `gate.timeout_seconds`（默认 300 s） |
-| 7100 端口被占 | 设环境变量 `PANEL_PORT` 换端口后再启动面板 |
-| 想把本包移动到其他目录 | 移动后需：① 在 demo 仓库内执行 `git remote set-url origin <新路径>\demo\closed-loop-demo-origin.git`；② 在 AO 中重新注册 demo 项目路径。闭环控制层自身路径无关，无需改动 |
+- R2：生成主路径引用图，逐组证明并收敛重复模块和旧入口；
+- R3：默认单 Worker、按需第二 Worker，收敛 Verifier、issue/thread 与控制权语义；
+- R4：通用 AO Project 选择、生效配置、人工 override 和自动审批权限；
+- R5：AO 路径与安装可移植性、CI、全新安装验证和干净交付。
 
-## 7. 质量基线（v0.2 冻结）
+当前没有承诺“任意电脑解压即可运行”。AO Desktop 需要单独安装和配置，
+`run_mission.py` 中仍存在待 R4/R5 收敛的本机 AO 路径。
 
-- **272 项离线自动化测试**全部通过（MockTransport，不访问真实网络）
-- **独立 PV 验证 S1–S9 全部通过**（含 Gate Pass、可控失败闭环、停止指令真停止等场景）
-- 冻结基线：git `098651b` 及后续清理提交（`c58a664`）
-- 架构权威文档：`closed-loop-v2/docs/ARCHITECTURE-v0.2.md`
+## 仓库结构
 
-## 8. 已知边界
+```text
+仓库根目录
+├─ docs/PROJECT.md                  当前权威架构
+├─ PLANS.md                         阶段、任务与验证证据
+└─ 交付/
+   ├─ closed-loop-v2/               当前 v0.2 主产品候选
+   ├─ clao-src/                     历史来源与参考实现
+   ├─ ao-supervision-sidecar/       历史来源与参考实现
+   ├─ closed-loop-demo/             演示目标仓库
+   ├─ closed-loop-demo-origin.git/  演示 bare origin
+   └─ ARCHITECTURE-v0.2.md          与权威架构同步的当前说明
+```
 
-- 面向技术用户的 v0.2，非零配置商业产品：首次需按第 4 节完成三步安装启动
-- Planner / Auditor / Worker 的创建与角色注入在本版本为半自动（面板一键下发任务后系统自动孵化与管理）
-- AO 官方升级后：本系统仅依赖 AO 公开 REST 与 `ao spawn` CLI 契约；若 AO 数据格式变化，重新注册项目即可恢复，控制层代码无需改动
+历史来源目录在 R2 完成引用关系证明前不会删除，也不是第二套正式产品入口。
 
----
+## 开发环境运行
 
-*开发方交付 · 2026-08-31 · 版本 v0.2*
+已验证环境使用 Windows、Python 3.12、本地
+`交付/closed-loop-v2/.venv`、单独运行的 AO Desktop，以及已通过 ChatGPT
+登录的 Codex CLI。
+
+```powershell
+cd 交付/closed-loop-v2
+$venvScripts = (Resolve-Path ".\.venv\Scripts").Path
+$env:PATH = "$venvScripts;$env:PATH"
+$env:PYTHONPATH = (Resolve-Path ".\src").Path
+
+.\.venv\Scripts\python.exe -m pytest .\tests -q
+.\.venv\Scripts\python.exe run_mission.py .\tasks\mission-quick.json --dry-run
+.\.venv\Scripts\python.exe .\panel\server.py
+```
+
+`--dry-run` 会真实调用一次只读、ephemeral 的 Codex Planner，但不会连接 AO、
+创建 Worker、StateStore 或 runtime 目录。真实 Mission 运行需要 AO daemon 和
+已注册 Project。
+
+当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。
+
+## 安全边界
+
+- 自动 push、自动合并和破坏性审批默认关闭；
+- Planner/Auditor/Verifier 使用只读、ephemeral、结构化输出的 Codex CLI 调用；
+- Observer 和 Gate 不使用模型；
+- Markdown、JSONL、前端缓存和拓扑图不作为运行状态源；
+- 不把 AO 用户数据、会话、凭据、Cookie、运行数据库或本机缓存作为交付内容。

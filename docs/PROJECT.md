@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 修正进行中（R0、R1-1、R1-2、R1-3 已完成）
+- 状态：R1 已完成；当前阶段为 R2，下一步 R2-1
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -44,15 +44,16 @@ Integration Gate
 │  ├─ ao-supervision-sidecar/       mission 产品化历史来源与参考实现
 │  ├─ closed-loop-demo/             演示目标仓库
 │  ├─ closed-loop-demo-origin.git/  演示 bare origin
-│  └─ ARCHITECTURE-v0.2.md          历史设计输入
+│  └─ ARCHITECTURE-v0.2.md          与本文件同步的当前架构说明
 ├─ AGENTS.md
 ├─ PLANS.md
 └─ docs/PROJECT.md
 ```
 
-R0 必须用入口、import、调用关系和测试复核上述定位。未经证明，不删除任何历史来源目录。
+R0 已通过入口、import、调用关系和测试复核上述定位。R2 完成具体引用关系证明前，
+不删除任何历史来源目录。
 
-## 三、当前实现：R0/R1-3 代码事实
+## 三、当前实现：R0/R1-4 事实基线
 
 ### 1. 当前主入口与控制路径
 
@@ -112,6 +113,11 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   `--model gpt-5.6-sol` 显式传递。`TaskSpec` 与 `MissionSpec` 缺省均为
   `codex`，生产 `worker.model` 缺省为 `gpt-5.6-sol`；旧 GLM 的
   “先带 model 失败、再去掉 model 重试” fallback 已移除。
+- R1-4 修正了 Panel Mission 构造中最后一处显式
+  `worker_harness=claude-code` 覆盖。当前 `panel/server.py`、
+  `tasks/mission-quick.json`、`MissionSpec`、`TaskSpec` 和 task-spec schema
+  均使用 `codex`；Panel 不硬编码 Worker model，`config/default.yaml` 的
+  `worker.model=gpt-5.6-sol` 由 `run_mission.py` 注入 `ActionExecutor`。
 - `AOAdapter` 通过 AO REST 读取 Project/Session/Conversation/activity，并可
   调用 approval resolve；`ActionExecutor` 承担 AO CLI 写操作。
 - `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
@@ -126,6 +132,15 @@ Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共�
 PlannerAction 的 transport schema 已显式覆盖 REPLAN 所需的非空
 `replacement_task_spec.objective`；共享 runner 不再把未声明 `properties` 的
 object schema 静默收窄为空对象，而是在启动 Codex 前 fail closed。
+
+当前 Verifier 仍在每个子任务 Gate 后和 Mission 最终 Gate 后调用；只在终局或
+高风险场景按需调用是 R3 目标。当前 Mission 也仍允许多个子任务；默认 1 个
+Worker、必要时最多 2 个是 R3 目标，不是 R1 已实现事实。
+
+`llm_env.py`、旧 Provider 类名兼容别名、旧审批回归注释，以及
+`tasks/mission-quick-002.json` 至 `mission-quick-014.json` 中的旧 harness 字符串
+属于兼容或历史运行证据，不进入当前默认生产组装路径。R2 将在引用关系证明后
+决定保留、隔离或删除；R1-4 不机械改名或改写历史证据。
 
 ### 3. Store、Bus、投影和用户指令
 
@@ -171,7 +186,7 @@ CL-AO 对应文件相同；v2 的 Mission、Store、Verifier、worktree 和多�
 则由 sidecar 来源继续演化。两套来源目录目前只作为同时交付的历史参考，
 R0 不据此删除或移动任何文件。
 
-## 四、修正目标架构
+## 四、后续收敛目标架构
 
 ```text
 ┌─────────────────────────────────────────┐
@@ -228,7 +243,7 @@ Planner、Auditor、Verifier 的共享调用边界必须使用 ephemeral、read-
 默认认证路径复用 Codex CLI / AO Codex 的 ChatGPT 登录额度，不改用 OpenAI API
 Key 作为默认接入方式。
 
-## 五、修正目标模块职责
+## 五、后续目标模块职责
 
 ### 1. Web Panel / CLI
 
@@ -355,7 +370,7 @@ AO Snapshot 仍是 Agent/turn/activity/worktree 的外部事实源。恢复时�
 
 只向 Planner 提交证据，不直接控制 Worker。普通子任务不默认调用。
 
-## 六、修正目标控制权与消息方向
+## 六、后续目标控制权与消息方向
 
 允许的核心自动路径：
 
@@ -382,7 +397,7 @@ UI → 绕过 MissionController 改状态
 
 用户可显式人工 override 非 Planner 角色，但 Controller 必须记录并暂停或替代冲突的自动 thread。
 
-## 七、修正目标状态与事实源
+## 七、后续目标状态与事实源
 
 | 数据 | 权威来源 |
 |---|---|
@@ -393,10 +408,11 @@ UI → 绕过 MissionController 改状态
 
 运行时不得从 Markdown、前端缓存或 Bus 内存恢复 Mission。
 
-## 八、R0 已确认的结构问题
+## 八、R0 已确认的问题与 R1 收敛结果
 
-1. 旧架构文档把 Planner/Auditor/Verifier 写成 AO Session，并把 Bus 写成唯一
-   AO 传输层；当前代码分别实现为 headless Provider 和 Store 后置投影。
+1. R0 发现旧架构文档把 Planner/Auditor/Verifier 写成 AO Session，并把 Bus
+   写成唯一 AO 传输层；R1-4 已将当前文档和前端统一为 headless Provider、
+   `MissionController` 控制平面与 Store 后置投影。
 2. `closed-loop-v2` 内同时保留两套 AO Client、Observer、Gate、协议和多套
    CLI，其中一套进入主路径，另一套主要是兼容或历史来源。
 3. 默认 Mission 的 `max_subtasks=2`，Planner 提示在该值大于 1 时要求拆成
@@ -405,19 +421,20 @@ UI → 绕过 MissionController 改状态
    最终合并或高风险独立复核。
 5. `issue_fingerprint()` 把 `source` 写入 key；`LoopBus.resolve_issue()` 只允许
    每个 issue 一次 verdict，没有 revision 语义。
-6. Store/AO/投影的代码主从关系可以确认，但 README、旧架构文档与前端表达
-   尚未统一到该事实。
+6. Store/AO/投影的代码主从关系已确认；R1-4 已同步 README、交付说明、
+   `ARCHITECTURE-v0.2.md` 和前端控制/证据流拓扑。
 7. `roles.*.model`、`roles.max_parallel_workers`、`ao.base_url` 等配置没有被
    当前 `run_mission.py` 组装路径完整消费，面板还维护另一组运行时参数。
 8. 面板默认且回退到 `closed-loop-demo`，没有从 AO 项目列表选择真实 Project。
 9. 自动审批存在；`auto_ff_master` 默认关闭，但面板 API 可开启自动快进和 push，
    两者都需要在 R4 单独审计权限边界。
-10. 文档分别声称 247 或 272 项测试；R0 实跑只收集到 252 项，数量不一致已证实。
+10. 旧文档曾分别声称 247 或 272 项测试；这些冻结数字已清理。R1-3 的
+    `main` 基线为 295 passed，以后以 CI/当前测试输出为准。
 
 ## 九、修正阶段
 
 - R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
-- R1：分步迁移 Codex Provider，并让代码注释、README、架构文档和前端拓扑说同一套真实架构；R1-3 已完成 Worker 迁移，下一步为 R1-4 文档/拓扑收尾；
+- R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
 - R2：证明并收敛重复模块、旧入口和参考代码；
 - R3：收敛 Worker、Verifier、issue/thread 与控制权语义；
 - R4：收敛配置、项目选择和高风险功能；

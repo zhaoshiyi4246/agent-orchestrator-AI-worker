@@ -50,9 +50,12 @@
   .node circle, .node rect { transition:all .3s; }
   .node text { fill:var(--text); font-size:12px; }
   .node .sub { fill:var(--dim); font-size:10px; }
-  .node.active circle { stroke:var(--green); stroke-width:3; filter:drop-shadow(0 0 6px var(--green)); }
+  .node.active circle, .node.active rect { stroke:var(--green); stroke-width:3; filter:drop-shadow(0 0 6px var(--green)); }
   .edge { stroke:#3d444d; stroke-width:1.5; fill:none; marker-end:url(#arr); }
-  .edge.one { stroke-dasharray:5 3; }
+  .edge.control { stroke:var(--accent); }
+  .edge.evidence { stroke:var(--purple); stroke-dasharray:5 3; }
+  .edge.projection { stroke:var(--dim); stroke-dasharray:2 4; }
+  .edge.both { marker-start:url(#arr); }
   .edge.live { stroke:var(--green); stroke-width:2.5; }
   .edge-label { fill:var(--dim); font-size:9px; }
   .knobs { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:10px; }
@@ -134,43 +137,51 @@ tests/**</textarea>
   <!-- 中：拓扑 + 时间参数 + 证据 -->
   <div>
     <div class="card topology-wrap">
-      <h3>Agent 协同拓扑（虚线=单向通道，实线=双向）</h3>
-      <svg id="topo" viewBox="0 0 640 380" width="640" height="380">
+      <h3>控制与证据流（实线=控制/读写，虚线=证据/派生投影）</h3>
+      <svg id="topo" viewBox="0 0 760 470" width="760" height="470">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
                   markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="#3d444d"/>
           </marker>
         </defs>
-        <!-- edges -->
-        <line class="edge"      x1="320" y1="48"  x2="320" y2="86"></line>
-        <line class="edge"      x1="200" y1="120" x2="130" y2="86"></line>
-        <line class="edge"      x1="130" y1="66"  x2="130" y2="40"></line>
-        <line class="edge one"  x1="60"  y1="196" x2="96"  y2="146"></line>
-        <line class="edge"      x1="200" y1="130" x2="320" y2="86"></line>
-        <line class="edge"      x1="320" y1="66"  x2="130" y2="86"></line>
-        <line class="edge"      x1="330" y1="86"  x2="470" y2="120"></line>
-        <line class="edge"      x1="470" y1="130" x2="330" y2="98"></line>
-        <line class="edge one"  x1="470" y1="140" x2="200" y2="140"></line>
-        <line class="edge one"  x1="530" y1="196" x2="500" y2="146"></line>
-        <line class="edge one"  x1="530" y1="206" x2="200" y2="206"></line>
-        <line class="edge"      x1="300" y1="120" x2="240" y2="300"></line>
-        <line class="edge"      x1="250" y1="310" x2="300" y2="130"></line>
-        <line class="edge one"  x1="470" y1="150" x2="400" y2="300"></line>
-        <text class="edge-label" x="328" y="66">指令</text>
-        <text class="edge-label" x="60"  y="166">告警</text>
-        <text class="edge-label" x="255" y="100">决策</text>
-        <text class="edge-label" x="380" y="96">PV任务</text>
-        <text class="edge-label" x="330" y="132">FAIL回流</text>
-        <text class="edge-label" x="545" y="166">通过</text>
-        <text class="edge-label" x="360" y="198">gate证据</text>
+        <!-- current physical control and evidence flow -->
+        <line class="edge control" x1="380" y1="50" x2="380" y2="76"></line>
+        <line class="edge control" x1="305" y1="108" x2="234" y2="151"></line>
+        <line class="edge control" x1="210" y1="194" x2="210" y2="370"></line>
+        <path class="edge control" d="M300,405 C350,345 345,180 365,124"></path>
+        <line class="edge evidence" x1="82" y1="348" x2="113" y2="272"></line>
+        <line class="edge evidence" x1="143" y1="232" x2="191" y2="187"></line>
+        <line class="edge evidence" x1="542" y1="151" x2="455" y2="110"></line>
+        <path class="edge evidence" d="M548,181 C430,235 265,242 148,252"></path>
+        <path class="edge evidence" d="M618,241 C575,155 500,112 455,105"></path>
+        <path class="edge evidence" d="M612,270 C480,295 305,235 235,186"></path>
+        <line class="edge control both" x1="380" y1="124" x2="380" y2="210"></line>
+        <path class="edge control both" d="M430,118 C485,190 470,305 410,330"></path>
+        <path class="edge projection" d="M440,238 C520,265 565,330 600,375"></path>
+        <text class="edge-label" x="388" y="67">Mission</text>
+        <text class="edge-label" x="250" y="125">规划</text>
+        <text class="edge-label" x="217" y="300">自动指令</text>
+        <text class="edge-label" x="282" y="342">状态/证据</text>
+        <text class="edge-label" x="56" y="304">触发</text>
+        <text class="edge-label" x="150" y="218">审计结果</text>
+        <text class="edge-label" x="455" y="205">Gate 证据</text>
+        <text class="edge-label" x="520" y="232">复核结果</text>
+        <text class="edge-label" x="390" y="174">运行状态</text>
+        <text class="edge-label" x="482" y="315">AO REST/CLI</text>
+        <text class="edge-label" x="515" y="318">派生</text>
         <!-- nodes -->
-        <g class="node" id="n-user"><circle cx="320" cy="30" r="18" fill="#1f6feb"/><text x="320" y="34" text-anchor="middle" fill="#fff">用户</text></g>
-        <g class="node" id="n-planner"><circle cx="320" cy="108" r="24" fill="#6e40c9"/><text x="320" y="112" text-anchor="middle" fill="#fff">Planner</text></g>
-        <g class="node" id="n-observer"><circle cx="60" cy="214" r="22" fill="#8957e5"/><text x="60" y="218" text-anchor="middle" fill="#fff">Observer</text><text class="sub" x="60" y="246" text-anchor="middle">确定性程序</text></g>
-        <g class="node" id="n-auditor"><circle cx="130" cy="108" r="22" fill="#9e6a03"/><text x="130" y="112" text-anchor="middle" fill="#fff">Auditor</text><text class="sub" x="130" y="140" text-anchor="middle">只读审计</text></g>
-        <g class="node" id="n-verifier"><circle cx="470" cy="130" r="22" fill="#1a7f37"/><text x="470" y="134" text-anchor="middle" fill="#fff">Verifier</text><text class="sub" x="470" y="158" text-anchor="middle">独立验证</text></g>
-        <g class="node" id="n-gate"><circle cx="530" cy="214" r="20" fill="#0b6e7a"/><text x="530" y="218" text-anchor="middle" fill="#fff">Gate</text><text class="sub" x="530" y="242" text-anchor="middle">确定性程序</text></g>
+        <g class="node" id="n-user"><circle cx="380" cy="30" r="20" fill="#1f6feb"/><text x="380" y="34" text-anchor="middle" fill="#fff">User</text></g>
+        <g class="node" id="n-controller"><rect x="305" y="76" width="150" height="48" rx="12" fill="#6e40c9"/><text x="380" y="96" text-anchor="middle" fill="#fff">MissionController</text><text class="sub" x="380" y="113" text-anchor="middle">唯一控制平面</text></g>
+        <g class="node" id="n-planner"><circle cx="210" cy="170" r="24" fill="#6e40c9"/><text x="210" y="174" text-anchor="middle" fill="#fff">Planner</text></g>
+        <g class="node" id="n-observer"><circle cx="65" cy="368" r="22" fill="#8957e5"/><text x="65" y="372" text-anchor="middle" fill="#fff">Observer</text><text class="sub" x="65" y="400" text-anchor="middle">确定性程序</text></g>
+        <g class="node" id="n-auditor"><circle cx="125" cy="252" r="22" fill="#9e6a03"/><text x="125" y="256" text-anchor="middle" fill="#fff">Auditor</text><text class="sub" x="125" y="282" text-anchor="middle">只读审计</text></g>
+        <g class="node" id="n-verifier"><circle cx="635" cy="262" r="24" fill="#1a7f37"/><text x="635" y="266" text-anchor="middle" fill="#fff">Verifier</text><text class="sub" x="635" y="294" text-anchor="middle">独立复核</text></g>
+        <g class="node" id="n-gate"><circle cx="565" cy="165" r="22" fill="#0b6e7a"/><text x="565" y="169" text-anchor="middle" fill="#fff">Gate</text><text class="sub" x="565" y="193" text-anchor="middle">确定性程序</text></g>
+        <g class="node" id="n-store"><rect x="320" y="210" width="120" height="50" rx="10" fill="#1f6feb"/><text x="380" y="232" text-anchor="middle" fill="#fff">StateStore</text><text class="sub" x="380" y="249" text-anchor="middle">唯一 CL-AO 状态源</text></g>
+        <g class="node" id="n-ao"><rect x="320" y="330" width="120" height="50" rx="10" fill="#b54708"/><text x="380" y="352" text-anchor="middle" fill="#fff">AO</text><text class="sub" x="380" y="369" text-anchor="middle">Session / worktree</text></g>
+        <g class="node" id="n-timeline"><rect x="540" y="375" width="180" height="48" rx="10" fill="#30363d"/><text x="630" y="397" text-anchor="middle">Event Projection</text><text class="sub" x="630" y="414" text-anchor="middle">Timeline / JSONL / Markdown</text></g>
+        <g class="node" id="n-worker-lane"><rect x="120" y="370" width="180" height="82" rx="12" fill="#21262d" stroke="#b54708"/><text class="sub" x="210" y="388" text-anchor="middle">Worker 1..N · AO Codex</text></g>
         <g id="workers"></g>
       </svg>
       <div id="lastAction" style="font-size:12px;color:var(--dim)">—</div>
@@ -301,13 +312,12 @@ function render(s){
   const wg = $("workers");
   const workers = subs.filter(t=>t.worker_session_id);
   wg.innerHTML = workers.map((t,i)=>{
-    const x = 220 + i*130, y = 320;
+    const x = workers.length===1 ? 210 : 145 + i*(130/(workers.length-1)), y = 416;
     const active = ["WORKER_RUNNING","WORKER_RETRYING"].includes(t.state) ? " active" : "";
     return `<g class="node${active}" id="n-w${i}">
-      <circle cx="${x}" cy="${y}" r="24" fill="#b54708"/>
+      <circle cx="${x}" cy="${y}" r="18" fill="#b54708"/>
       <text x="${x}" y="${y+4}" text-anchor="middle" fill="#fff">W${i+1}</text>
-      <text class="sub" x="${x}" y="${y+34}" text-anchor="middle">${esc((t.worker_session_id||"").slice(-12))}</text>
-      <text class="sub" x="${x}" y="${y+46}" text-anchor="middle">${esc(t.state)}</text></g>`;
+      <text class="sub" x="${x}" y="${y+31}" text-anchor="middle">${esc(t.state)}</text></g>`;
   }).join("");
   // directive targets: refresh workers
   const sel = $("d_target"), cur = sel.value;
@@ -325,8 +335,8 @@ function render(s){
   const lt = (s.transitions||[])[0];
   if(lt){
     const map = {observer:"n-observer", auditor:"n-auditor", planner:"n-planner",
-                 verifier:"n-verifier", integration_gate:"n-gate", closed_loop:"n-planner",
-                 executor:"n-planner", user:"n-user"};
+                 verifier:"n-verifier", integration_gate:"n-gate", closed_loop:"n-controller",
+                 executor:"n-controller", user:"n-user"};
     const id = map[lt.actor]; if(id) $(id)?.classList.add("active");
     $("lastAction").textContent = `最近：${lt.task} → ${lt.to}（${lt.actor}：${lt.reason}）`;
   }
@@ -350,7 +360,7 @@ function render(s){
   (s.transitions||[]).forEach(t=>evs.push({at:t.at, html:
     `<span class="actor">${esc(t.actor)}</span> ${esc(t.task)} → <b>${esc(t.to)}</b> <span class="t">${esc(t.reason)}</span>`}));
   (s.traffic||[]).slice(-8).forEach(t=>evs.push({at:t.at||"", html:
-    `<span class="actor">bus</span> ${esc(t.sender||"")}→${esc(t.receiver||"")} ${esc(t.kind||"")}`}));
+    `<span class="actor">事件投影</span> ${esc(t.sender||"")}→${esc(t.receiver||"")} ${esc(t.kind||"")}`}));
   $("tab-ev").innerHTML = evs.slice(0,30).map(e=>
     `<div class="ev"><span class="t">${esc((e.at||"").slice(11,19))}</span> ${e.html}</div>`).join("") || "—";
 

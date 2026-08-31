@@ -518,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
             "acceptance_criteria": acs,
             "gate_commands": gates,
             "user_instruction": body.get("user_instruction") or "",
-            "worker_harness": "claude-code",
+            "worker_harness": "codex",
             "budgets": {"max_subtasks": int(body.get("max_subtasks") or 2),
                         "max_total_replans": 2,
                         "max_runtime_seconds": 3600,
