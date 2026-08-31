@@ -45,6 +45,11 @@
 - Verifier 仅用于最终合并或高风险独立复核，只向 Planner 提交证据，不直接控制 Worker。
 - 只有 Planner 可以向 Worker 下发自动执行指令。
 - 用户对非 Planner 角色的直接指令必须被视为显式人工 override，并可追踪地暂停或替代当前自动流程，不能与自动指令静默并行。
+- 当前目标 LLM Provider 是 Codex CLI：Planner、Auditor、Verifier 使用 headless Codex Provider，Worker 使用 AO 中的 Codex harness。
+- 目标默认模型为 `gpt-5.6-sol`，但模型选择必须保持可配置，不得成为永久架构不变量。
+- Observer 与 Integration Gate 不使用模型。
+- 默认路径复用 Codex CLI / AO Codex 的 ChatGPT 登录，不以 OpenAI API Key 接入作为默认路径。
+- 不再新增 Claude、GLM、Kimi 等第二套默认 Provider。
 
 ## 五、禁止无必要新增
 
@@ -75,7 +80,7 @@
   3. 测试覆盖；
   4. 回滚影响。
 - 配置项必须有真实消费者；未接线配置应删除或明确标记为保留，不得伪装成已生效。
-- 不改变运行时模型选择，除非当前任务明确要求。Codex 是开发工具，不等于产品必须使用 Codex 模型。
+- Provider 迁移必须在独立代码任务中完成；R0 只记录目标基线，不修改运行时代码。
 
 ## 八、验证纪律
 

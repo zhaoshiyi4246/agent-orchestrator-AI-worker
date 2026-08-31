@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R0 修正初始化
+- 状态：R1 修正进行中（R0 已完成）
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -93,14 +93,18 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
 
 - Planner、Auditor、Verifier 都不是 AO Session。三者分别通过本机
   `claude -p` 的 headless Provider 同步调用外部模型；类名
-  `AOOrchestratorPlannerProvider` 不代表它由 AO 孵化。
+  `AOOrchestratorPlannerProvider` 不代表它由 AO 孵化。当前三者仍通过
+  `ANTHROPIC_MODEL*` 选择模型，默认值仍为 `GLM-5.2`。
 - Worker 由 `ActionExecutor` 调用 `ao.exe spawn --kind worker` 创建，并通过
-  `ao send`、`ao session kill` 管理。
+  `ao send`、`ao session kill` 管理；当前 `worker_harness` 默认仍为
+  `claude-code`，`worker.model` 默认仍为 `GLM-5.2`。
 - `AOAdapter` 通过 AO REST 读取 Project/Session/Conversation/activity，并可
   调用 approval resolve；`ActionExecutor` 承担 AO CLI 写操作。
 - `--dry-run` 会禁止 Worker 孵化、用户指令投递和 worktree 合并，但仍创建
   真实 headless Planner/Auditor/Verifier Provider，并在拆解阶段调用 Planner；
-  因而当前 dry-run 不是完全离线模型路径。
+  因而当前 dry-run 不是完全离线模型路径。R0 实跑时，本机没有 Claude CLI，
+  Planner 两次拆解失败后 Mission 进入 `HUMAN`。这是待替换的旧 Provider
+  依赖证据，不是目标架构，也不构成安装 Claude 的待办。
 
 ### 3. Store、Bus、投影和用户指令
 
@@ -177,6 +181,31 @@ R0 不据此删除或移动任何文件。
       │ Markdown、JSONL、拓扑图等派生展示      │
       └────────────────────────────────────────┘
 ```
+
+### 目标 LLM 路径
+
+```text
+Planner / Auditor / Verifier
+  → 一个共享的 Codex CLI 调用边界
+  → codex exec
+  → GPT-5.6 Sol
+
+Worker
+  → AO Codex Worker
+  → GPT-5.6 Sol
+
+Observer / Integration Gate
+  → deterministic program
+  → no model
+```
+
+Planner、Auditor、Verifier 的共享调用边界必须使用 ephemeral、read-only 和
+结构化输出；角色 prompt 与任务输入通过 stdin 或等价的安全输入传递。模型输出
+仍由现有 schema/validator 在本地严格验证，且不得绕过 `MissionController` 改变
+状态或控制 Worker。Verifier 只在终局或高风险场景按需调用，不默认用于每个普通
+子任务。默认模型为 `gpt-5.6-sol`，但该值必须可配置，不是永久架构不变量。
+默认认证路径复用 Codex CLI / AO Codex 的 ChatGPT 登录额度，不改用 OpenAI API
+Key 作为默认接入方式。
 
 ## 五、修正目标模块职责
 
@@ -366,8 +395,8 @@ UI → 绕过 MissionController 改状态
 
 ## 九、修正阶段
 
-- R0：建立治理文件，确认真实入口、调用关系和测试基线；
-- R1：让代码注释、README、架构文档和前端拓扑说同一套真实架构；
+- R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
+- R1：分步迁移 Codex Provider，并让代码注释、README、架构文档和前端拓扑说同一套真实架构；
 - R2：证明并收敛重复模块、旧入口和参考代码；
 - R3：收敛 Worker、Verifier、issue/thread 与控制权语义；
 - R4：收敛配置、项目选择和高风险功能；

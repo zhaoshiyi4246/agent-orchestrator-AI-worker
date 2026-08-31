@@ -1,10 +1,10 @@
 # v0.2 修正计划
 
-- 当前阶段：R0 — 修正基线与项目上下文
-- 当前任务：审计初始化 PR，并处理测试 PATH 与 dry-run 外部模型阻塞
+- 当前阶段：R1 — Provider 迁移与架构事实统一
+- 当前任务：实现并验证 Codex CLI Provider，先迁移 Planner 并恢复 dry-run
 - 当前状态：进行中
-- 下一步：审计 PR #1，解决规定测试命令的 PATH 基线和 dry-run 的
-  headless Planner 依赖，再判断 R0 是否可以完成
+- 下一步：在独立代码任务中实现共享 Codex CLI 调用边界，先迁移 Planner，
+  保持现有 schema/validator 与 `MissionController` 控制边界
 
 ## 一、更新规则
 
@@ -29,8 +29,8 @@
 
 | 阶段 | 目标 | 状态 |
 |---|---|---|
-| R0 | 修正基线、治理文件、真实入口与测试基线 | 进行中 |
-| R1 | 架构事实、文档、代码注释与前端拓扑统一 | 未开始 |
+| R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
+| R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 进行中 |
 | R2 | 重复模块、旧入口和参考代码收敛 | 未开始 |
 | R3 | Worker 数量、Verifier、issue/thread 与控制语义收敛 | 未开始 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
@@ -47,10 +47,11 @@ R0 只做基线，不修改产品行为。
 - [x] 通过入口、import 和调用关系确认当前主运行路径；
 - [x] 确认 `MissionController`、`StateStore`、AOAdapter、Observer、Gate、Provider 和 Bus Projector 的真实关系；
 - [x] 列出重复 AO Client、Observer、Gate、协议和 CLI 的实际引用；
-- [x] 在本地 Python 3.12 虚拟环境中运行 v0.2 完整测试（结果有 1 项失败）；
+- [x] 在本地 Python 3.12 虚拟环境中运行 v0.2 完整测试（252 项全部通过）；
 - [x] 运行 `compileall` 或等价语法检查；
-- [x] 运行 `run_mission.py ... --dry-run`（结果为 HUMAN，未成功完成）；
-- [x] 记录 Python 版本、测试数量、失败项和 dry-run 结果；
+- [x] 运行 `run_mission.py ... --dry-run`，并将 HUMAN 结果准确分类为旧 Provider 依赖证据；
+- [x] 验证 Codex CLI 使用 ChatGPT 登录，且 GPT-5.6 Sol headless probe 成功；
+- [x] 记录 Python、测试、compileall、Codex probe 和 dry-run 的真实结果；
 - [x] 暂存区只包含治理文件和 `.gitignore`；
 - [x] 已创建面向 `main` 的 PR #1，保持未合并。
 
@@ -60,21 +61,22 @@ R0 只做基线，不修改产品行为。
 |---|---|
 | 仓库基线 HEAD | `b352714`；fresh fetch 后 `main...origin/main` 为 `0 0`，任务分支基于最新 `origin/main` |
 | Python | CPython `3.12.7`；本地环境 `交付/closed-loop-v2/.venv` |
-| 主测试命令 | `PYTHONPATH=src .\.venv\Scripts\python.exe -m pytest .\tests -q` |
-| 测试结果 | 收集 252 项：`251 passed, 1 failed`，165.17 s；失败为 `tests/sidecar_port/test_phase3.py::test_gate_pass` |
-| 测试失败分类 | 规定命令下的本地 PATH/解释器环境问题：Gate 把 `python` 解析为系统 Python 3.12 解释器，该解释器报 `No module named pytest`；把 `.venv\Scripts` 前置到 PATH 后，该失败用例单独运行 `1 passed` |
-| compileall | `python -m compileall -q src panel run_mission.py`，退出 0 |
-| dry-run | 使用已提交的 `tasks/mission-quick.json`；原生退出码 2，0.2 s 到达 `HUMAN`，原因是 headless Planner 两次拆解均因找不到 `claude` 可执行文件失败；未连接 AO，尝试了外部模型 Provider 但没有实际模型调用成功 |
+| 主测试命令 | PowerShell 中设置 `PYTHONPATH=src`，将 `.venv\Scripts` 前置到 `PATH`，再运行 `.\.venv\Scripts\python.exe -m pytest .\tests -q` |
+| 测试结果 | 收集 252 项：`252 passed`，32.59 s，退出码 0 |
+| 测试环境结论 | 前次唯一失败由 Gate 子进程把 `python` 解析为系统解释器造成；将 `.venv\Scripts` 前置到 `PATH` 后，完整基线全部通过，无需修改产品代码或依赖 |
+| compileall | `.\.venv\Scripts\python.exe -m compileall -q src panel run_mission.py`，退出码 0，0.08 s |
+| Codex CLI | `codex-cli 0.150.1`；`codex login status` 返回 `Logged in using ChatGPT`；未读取或记录账号、Token、Cookie、用户配置 |
+| Codex headless probe | 通过 stdin 调用 `codex exec --ephemeral --sandbox read-only --model gpt-5.6-sol --json -`；最终 JSON 为 `{"ok":true,"probe":"codex-headless-read-only"}`，本地解析与字段校验通过，退出码 0 |
+| dry-run | 使用已提交的 `tasks/mission-quick.json`；原生退出码 2，0.2 s 到达 `HUMAN`，原因是当前 headless Planner 两次拆解均调用旧 `claude` Provider 且找不到可执行文件；这是已确认的旧 Provider 依赖证据，不是安装 Claude 的环境待办。Provider 迁移完成前不要求旧 dry-run 成功 |
 | 当前主入口 | `启动面板.bat → panel/server.py → run_mission.build_runtime()`；`run_mission.py → build_runtime() → run_loop()` |
 | 当前唯一控制平面 | 当前代码主路径为 `MissionController`；`LoopBus` 不参与状态迁移或 Agent 指令投递 |
 | 当前状态源 | CL-AO Mission/Task/预算/恢复为 SQLite `StateStore`；AO Snapshot 提供 Worker 事实；Bus、Markdown、JSONL 是后置投影 |
 | 已确认重复模块 | `ao_adapter/ao_client`、`event_observer/observer`、`mission_gate/integration_gate`、`mission_contracts/protocol`、四套 CLI；详见 `docs/PROJECT.md` |
 | 初始化 PR | `#1`，状态 OPEN，目标分支 `main`，未合并 |
 
-当前阻塞：
-
-- 规定的完整测试命令有 1 项本地 PATH/解释器失败；
-- dry-run 仍依赖 headless Planner，且本机没有 `claude`，因此未完成成功 dry-run。
+R0 关闭结论：治理文件、主路径与重复模块盘点已建立；完整 pytest、compileall、
+Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run 失败已准确
+分类为待迁移实现，不再作为 R0 阻塞，R0 因此完成。
 
 环境或依赖阻塞时，记录原始错误并区分：
 
@@ -101,18 +103,26 @@ R0 只做基线，不修改产品行为。
 | K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
 | K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已确认：文档声称 247/272，本次实际收集 252 项 |
+| K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已确认：目标改为 Codex CLI + GPT-5.6 Sol |
+| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已确认：目标改为 AO Codex harness + GPT-5.6 Sol；具体 AO harness/model 参数必须通过本机 live probe 确认 |
+| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已确认：后续独立任务统一清理，不在 R0 修改 |
 
 ## 六、阶段边界
 
 ### R1
 
-只统一事实与展示，不做大规模删除。目标：
+按独立小任务迁移 Provider 并统一事实与展示，不做一次性大重构或大规模删除。
+第一任务是“实现并验证 Codex CLI Provider，先迁移 Planner 并恢复 dry-run”。其后
+再分别迁移 Auditor/Verifier、依据本机 live probe 迁移 AO Worker，并清理 K17 文档
+和配置表述。目标：
 
 - `MissionController` 唯一控制平面；
 - `StateStore` 唯一 CL-AO 状态源；
 - Bus 改为 Event Projection；
 - 前端拓扑区分逻辑角色与真实物理调用；
 - README、架构文档、代码注释一致。
+- Planner/Auditor/Verifier 共享一个 ephemeral、read-only、结构化输出的 Codex CLI 调用边界；
+- Worker 使用经本机 live probe 验证的 AO Codex harness/model 参数。
 
 ### R2
 
