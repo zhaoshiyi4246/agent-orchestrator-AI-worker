@@ -212,7 +212,8 @@ R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-
 
 - Worker 默认 1，最多 2；
 - Verifier 终局/高风险可选；
-- 自动指令统一由 Planner 发出；
+- 当前 `ClosedLoop` 仍有 bounded L0 direct worker nudge；R3 决定保留该
+  fast path，还是将自动 Worker 指令统一路由 Planner；
 - fingerprint 去 source；
 - thread revision 支持多轮新证据。
 

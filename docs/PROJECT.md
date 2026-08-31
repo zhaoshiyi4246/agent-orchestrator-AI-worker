@@ -137,6 +137,13 @@ object schema 静默收窄为空对象，而是在启动 Codex 前 fail closed�
 高风险场景按需调用是 R3 目标。当前 Mission 也仍允许多个子任务；默认 1 个
 Worker、必要时最多 2 个是 R3 目标，不是 R1 已实现事实。
 
+当前 `ClosedLoop` 还保留一条 deterministic L0 fast path：fresh local error 在
+任务仍为 `WORKER_RUNNING`、Worker 不处于进行中的 turn、孵化 grace 已满足且
+fingerprint 尚未发送过时，可以直接调用 `ActionExecutor.nudge_worker()`，不经过
+Auditor 或 Planner。每个 fingerprint 最多发送一次；重复问题产生 L1 alert 后仍
+升级到 Auditor → Planner。该路径属于 MissionController 直接组装的 `ClosedLoop`
+控制层，不是第二个控制平面。R3 将决定保留该 fast path，还是统一路由 Planner。
+
 `llm_env.py`、旧 Provider 类名兼容别名、旧审批回归注释，以及
 `tasks/mission-quick-002.json` 至 `mission-quick-014.json` 中的旧 harness 字符串
 属于兼容或历史运行证据，不进入当前默认生产组装路径。R2 将在引用关系证明后
@@ -371,6 +378,9 @@ AO Snapshot 仍是 Agent/turn/activity/worktree 的外部事实源。恢复时�
 只向 Planner 提交证据，不直接控制 Worker。普通子任务不默认调用。
 
 ## 六、后续目标控制权与消息方向
+
+以下 Planner-only 自动消息方向是 R3 收敛目标，不是 R1 当前实现事实；当前有界
+L0 direct worker nudge 在 R3 作出保留或收敛决定前仍是明确例外。
 
 允许的核心自动路径：
 

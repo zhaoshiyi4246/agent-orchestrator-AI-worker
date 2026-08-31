@@ -100,7 +100,7 @@ Worker 派发、合并、Gate 和 Verifier 调用都由它或其直接组装的
 ```text
 User → MissionController
 MissionController → Planner
-Planner → Worker
+Planner → ActionExecutor → Worker
 Worker → MissionController
 Observer → Auditor
 Auditor → Planner
@@ -110,13 +110,32 @@ MissionController ↔ StateStore
 MissionController ↔ AO
 ```
 
+其中主语义闭环是：
+
+```text
+Observer → Auditor → Planner → ActionExecutor → Worker
+Gate / Verifier evidence → Planner → ActionExecutor → Worker
+```
+
 这张逻辑关系图不表示存在对应的点对点物理 Agent 通道。特别是：
 
 - Auditor 不直接向 Worker 自动投递 `LOCAL_FIX`；
 - Verifier 不直接向 Worker 投递 `FIX_REQUEST`；
 - Observer 不直接控制 Worker；
-- 只有 Planner 的裁决可经 Controller/ActionExecutor 转成 Worker 自动指令；
+- 项目级语义裁决权属于唯一 Planner；
 - Gate 和 Verifier 结果先进入 Controller/Store，再成为 Planner 可用证据。
+
+### 当前有界 L0 例外
+
+当前 `ClosedLoop._maybe_l0_nudge()` 对 fresh local error 保留一条
+deterministic fast path：在任务仍为 `WORKER_RUNNING`、Worker 不处于进行中的
+turn、孵化 grace 已满足且该 fingerprint 尚未发送过时，它可以直接调用
+`ActionExecutor.nudge_worker()`。该路径不调用 Auditor 或 Planner，每个 fingerprint
+最多一次；重复问题产生 L1 alert 后仍升级到 Auditor → Planner。
+
+这条路径位于 MissionController 直接组装的 `ClosedLoop` 控制层内，AO 写操作仍经
+`ActionExecutor`，不是第二个控制平面。它是当前实现事实，不是目标不变量；R3
+将决定保留该 fast path，还是把它统一收敛到 Planner 控制。
 
 用户指令的真实路径是：
 
@@ -198,7 +217,8 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 - R2：生成主路径引用图，逐组证明并收敛重复 AO Client、Observer、Gate、
   协议和旧 CLI；在此之前不删除参考目录或兼容模块。
 - R3：默认 1 个 Worker、必要时最多 2 个；收敛 Verifier 调用策略、
-  issue fingerprint 和 thread revision；自动 Worker 指令统一由 Planner 发出。
+  issue fingerprint 和 thread revision；决定保留当前有界 L0 fast path，还是将
+  自动 Worker 指令统一由 Planner 发出。
 - R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
   保持自动 push/merge 默认关闭。
 - R5：CI、全新 clone 安装、AO 官方依赖说明、路径可移植性、真实 Demo 和
@@ -217,7 +237,12 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 4. Observer 和 Integration Gate 是确定性程序，不使用模型；
 5. Auditor 只读并只向 Planner 提交审计结果；
 6. Verifier 只输出证据，不直接控制 Worker；
-7. Planner 项目级唯一，只有 Planner 可以触发自动 Worker 指令；
+7. Planner 项目级唯一并拥有项目级语义裁决权；Auditor、Verifier、Observer
+   不直接向 Worker 下发语义修复指令；当前 `ClosedLoop` 仍保留一个有界的
+   deterministic L0 local-error nudge；
 8. Bus 和所有展示产物都是派生投影，不参与恢复或裁决；
 9. 模型与 harness 可配置，当前默认契约为 Codex / `gpt-5.6-sol`；
 10. 自动 push、自动合并和破坏性审批保持默认关闭。
+
+“所有自动 Worker 指令统一由 Planner 发出”是 R3 收敛目标，不是 R1 当前实现
+不变量。
