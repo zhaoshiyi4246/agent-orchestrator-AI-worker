@@ -1,10 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R1 — Provider 迁移与架构事实统一
-- 当前任务：R1-1 — 迁移 Planner Provider 并恢复 planning dry-run
-- 当前状态：R1-1 已完成审计修复与真实 REPLAN 验证，R1 继续进行
-- 下一步：R1-2 — 在独立任务中迁移 Auditor 和 Verifier，复用已验证的
-  Codex CLI 调用边界
+- 当前任务：R1-2 — 迁移 Auditor 与 Verifier，复用共享 Codex CLI 边界
+- 当前状态：R1-2 已通过离线测试与两个真实 Provider probe，R1 继续进行
+- 下一步：R1-3 — 验证并迁移 AO Codex Worker harness/model
 
 ## 一、更新规则
 
@@ -101,10 +100,29 @@ Codex ChatGPT 登录与 GPT-5.6 Sol headless probe 均已通过。旧 dry-run �
 | live 副作用 | 未连接 AO、未创建 Worker、未创建或更新 runtime/state；既有 `runtime/MISSION-QUICK-001` 文件时间与 SHA-256 均保持不变 |
 
 R1-1 关闭结论：共享 runner、Planner 迁移、planning dry-run 及 REPLAN payload
-审计修复均已通过离线与真实 Codex 验证。Auditor、Verifier 和 AO Worker 尚未
-迁移，下一独立任务仍为 R1-2。
+审计修复均已通过离线与真实 Codex 验证。该任务结束时 Auditor、Verifier 和 AO
+Worker 尚未迁移；Auditor/Verifier 的后续迁移证据见 R1-2。
 
-## 六、已知问题清单
+## 六、R1-2 验收证据
+
+| 项目 | 结果 |
+|---|---|
+| 生产 Auditor | `CodexCliAuditorProvider` 复用 `run_codex_json()` 与现有 audit schema；保留 EvidenceBundle 截断、本地 validator、一次重试和两次失败后的 HUMAN fallback；旧类名仅为简单别名 |
+| 生产 Verifier | `CodexCliVerifierProvider` 复用 `run_codex_json()` 与现有 verifier schema；保留 VerifierInput 截断、`_coerce`、本地 validator、一次重试和两次失败后的 FAIL fallback；旧类名仅为简单别名 |
+| 运行时组装 | `MissionRuntime` 使用三个 Codex Provider；模型分别读取 `roles.planner.model`、`roles.auditor.model`、`roles.verifier.model`，缺省均回退 `gpt-5.6-sol`；planning dry-run 仍只构造 Planner |
+| `llm_env` 边界 | 生产 `setup_environment()` 不再调用 `ensure_llm_env()`；`llm_env.py` 未删除，仅作为待 R2 审计的兼容遗留 |
+| 离线测试 | `pytest tests -q`：291 项全部通过；退出码 0；其中直接相关回归 56 项全部通过 |
+| 语法与 diff | `compileall -q src panel run_mission.py` 与 `git diff --check` 均退出 0 |
+| live Auditor | `codex-cli 0.150.1`、ChatGPT 登录、`gpt-5.6-sol`；最小失败 EvidenceBundle 返回匹配 ID 的 `LOCAL_FIX`，本地 validator 通过，evidence 与 recommended_action 非空 |
+| live Verifier | 同一 Codex 环境；含 `tests/test_x.py` 确定性路径违规的最小 VerifierInput 返回匹配 ID 的 `FAIL`，本地 validator 通过，anti-gaming 含 FAIL 项 |
+| live 副作用 | 两个 probe 均使用 ephemeral/read-only；未连接 AO、未创建 Worker、未构造 StateStore，probe 期间没有 runtime 文件写入 |
+| 保留边界 | Worker 仍使用旧 AO harness/model；Verifier 调用频率与 ClosedLoop/MissionController 状态机均未调整 |
+
+R1-2 关闭结论：Auditor 与 Verifier 已迁移到共享 Codex CLI 边界，离线全测与
+两个真实 Provider probe 均通过；K15 完全解决。下一独立任务为 R1-3，验证并迁移
+AO Codex Worker harness/model。
+
+## 七、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
 |---|---|---|---|
@@ -121,19 +139,19 @@ R1-1 关闭结论：共享 runner、Planner 迁移、planning dry-run 及 REPLAN
 | K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
 | K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已确认：文档声称 247/272，本次实际收集 252 项 |
-| K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 部分解决：Planner 已迁移 Codex CLI；Auditor/Verifier 仍未迁移，列入 R1-2 |
+| K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 未解决：具体 AO Codex harness/model 参数仍须在后续独立任务通过本机 live probe 确认 |
-| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 进行中：仅 `roles.planner.model` 已在 R1-1 更新；其余文档与 Auditor/Verifier/Worker 配置留待后续任务 |
-| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 已确认：R1-1 不扩 scope，计划在配置收敛与干净交付阶段处理 |
+| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 部分解决：生产 Provider 与 `default.yaml` 的三个 role model 已更新；README、旧 ARCHITECTURE 与 Worker 配置仍待处理 |
+| K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 未解决：R1-2 不扩 scope，仍计划在配置收敛与干净交付阶段处理 |
 
-## 七、阶段边界
+## 八、阶段边界
 
 ### R1
 
 按独立小任务迁移 Provider 并统一事实与展示，不做一次性大重构或大规模删除。
-第一任务是“实现并验证 Codex CLI Provider，先迁移 Planner 并恢复 dry-run”。其后
-再分别迁移 Auditor/Verifier、依据本机 live probe 迁移 AO Worker，并清理 K17 文档
-和配置表述。目标：
+R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier。下一任务为
+R1-3：依据本机 live probe 验证并迁移 AO Codex Worker harness/model；其后继续
+清理 K17 文档和配置表述。目标：
 
 - `MissionController` 唯一控制平面；
 - `StateStore` 唯一 CL-AO 状态源；
@@ -178,9 +196,10 @@ R1-1 关闭结论：共享 runner、Planner 迁移、planning dry-run 及 REPLAN
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-R1-1 已完成；下一独立任务为 R1-2：迁移 Auditor 和 Verifier。
+R1-1、R1-2 已完成；下一独立任务为 R1-3：验证并迁移 AO Codex Worker
+harness/model。
 
-## 八、停止条件
+## 九、停止条件
 
 出现以下任一情况立即停止当前任务并报告：
 

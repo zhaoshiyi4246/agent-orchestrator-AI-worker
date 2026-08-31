@@ -5,10 +5,10 @@ Usage (from the closed-loop-v2 directory):
     PYTHONPATH=src .venv/Scripts/python.exe run_mission.py tasks/mission-quick.json
     ... add --dry-run to preflight Planner decomposition without touching AO.
 
-Wires: config -> AO daemon -> MissionController (Planner via Codex CLI;
-Auditor/Verifier temporarily via Claude CLI; Workers temporarily created by
-the legacy AO harness) -> LoopBus projection -> memory.md / project.md ->
-FINAL_REPORT.
+Wires: config -> AO daemon -> MissionController (Planner/Auditor/Verifier via
+Codex CLI; Workers temporarily created by the legacy AO harness;
+Observer/Gate use no model) -> LoopBus projection -> memory.md / project.md
+-> FINAL_REPORT.
 
 The same wiring is importable (build_runtime / run_loop) so the web panel
 drives the EXACT code path this CLI validates — no second implementation.
@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from loopcore.action_executor import ActionExecutor          # noqa: E402
 from loopcore.ao_adapter import AOAdapter                    # noqa: E402
-from loopcore.auditor import ClaudeCliAuditorProvider        # noqa: E402
+from loopcore.auditor import CodexCliAuditorProvider         # noqa: E402
 from loopcore.bus import BusConfig, LoopBus                  # noqa: E402
 from loopcore.bus_projector import StoreBusProjector         # noqa: E402
 from loopcore.memory import ProjectMemory                    # noqa: E402
@@ -39,7 +39,7 @@ from loopcore.mission_contracts import MissionSpec           # noqa: E402
 from loopcore.mission_gate import IntegrationGate            # noqa: E402
 from loopcore.planner_adapter import CodexCliPlannerProvider       # noqa: E402
 from loopcore.state_store import StateStore                  # noqa: E402
-from loopcore.verifier import ClaudeCliVerifierProvider      # noqa: E402
+from loopcore.verifier import CodexCliVerifierProvider       # noqa: E402
 
 AO_BIN = r"E:\智理杯智能体大赛\ao-app\resources\daemon\ao.exe"
 AO_DATA_DIR = r"E:\智理杯智能体大赛\ao-data"
@@ -49,14 +49,11 @@ AO_RUN_FILE = str(Path(AO_DATA_DIR) / "ao.run")
 def setup_environment() -> None:
     """Process-level env every entry point needs (CLI, panel, scripts).
 
-    The remaining Claude Auditor/Verifier defaults live in loopcore.llm_env;
-    what remains here is AO daemon discovery and the venv-first PATH for the
-    integration gate. The Codex Planner does not use this environment setup.
+    This only configures AO daemon discovery and the venv-first PATH for the
+    integration gate. Codex role providers do not use llm_env.
     """
     os.environ.setdefault("AO_DATA_DIR", AO_DATA_DIR)
     os.environ.setdefault("AO_RUN_FILE", AO_RUN_FILE)
-    from loopcore.llm_env import ensure_llm_env
-    ensure_llm_env()
     # the mission gate runs `python -m pytest` argv-style: make sure the
     # venv python (with pytest) wins PATH resolution.
     venv_scripts = str(ROOT / ".venv" / "Scripts")
@@ -109,10 +106,17 @@ class MissionRuntime:
                 wcfg.get("spawn_transient_backoff_seconds", 90)))
         self.gate = IntegrationGate(self.store)
         planner = build_planner(cfg, timeout=180, cwd=ROOT)
-        auditor = ClaudeCliAuditorProvider(timeout=120)
-        verifier = ClaudeCliVerifierProvider(timeout=120)
-        # Keep references so close() can release their temp files; the panel
-        # creates a MissionRuntime per mission and must not leak .md files.
+        roles = cfg.get("roles") or {}
+        auditor_cfg = roles.get("auditor") or {}
+        verifier_cfg = roles.get("verifier") or {}
+        auditor = CodexCliAuditorProvider(
+            model=auditor_cfg.get("model") or "gpt-5.6-sol",
+            timeout=120, cwd=ROOT)
+        verifier = CodexCliVerifierProvider(
+            model=verifier_cfg.get("model") or "gpt-5.6-sol",
+            timeout=120, cwd=ROOT)
+        # Keep references for lifecycle introspection and compatibility with
+        # any provider that exposes optional cleanup.
         self._planner = planner
         self._auditor = auditor
         self._verifier = verifier
@@ -135,9 +139,9 @@ class MissionRuntime:
             traffic_log=self.runtime / "bus_traffic.jsonl")
 
     def close(self) -> None:
-        """Release provider temp files and the sqlite connection. Idempotent.
+        """Release optional provider resources and sqlite. Idempotent.
         The panel calls this when a mission is unloaded; the CLI path relies
-        on process exit, but close() makes long-running panel use leak-free."""
+        on process exit, but close() keeps long-running panel use leak-free."""
         for prov in (self._planner, self._auditor, self._verifier):
             fn = getattr(prov, "close", None)
             if callable(fn):
