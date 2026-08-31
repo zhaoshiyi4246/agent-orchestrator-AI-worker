@@ -48,7 +48,7 @@ ao:
   poll_interval_seconds: 10
 
 worker:
-  model: "GLM-5.2"            # ao spawn --model；网关默认模型对 claude-code 会 403
+  model: gpt-5.6-sol          # ao spawn --model；AO Codex live probe 已验证
 
 auditor:
   audit_interval_seconds: 300 # 例行审计节奏（推荐 5 分钟）；有 TRIGGER 时立即审计
@@ -66,7 +66,7 @@ roles:
   verifier:
     model: gpt-5.6-sol
   worker:
-    model: glm-5.2           # sidecar 实机验证过的 Worker 模型
+    model: gpt-5.6-sol
   max_parallel_workers: 2
 
 gate:

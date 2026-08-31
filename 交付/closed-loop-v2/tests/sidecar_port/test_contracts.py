@@ -38,6 +38,7 @@ def test_task_spec_roundtrip():
     ok, msg = ts.validate()
     assert ok, msg
     assert ts.budgets["max_local_fixes"] == 2
+    assert ts.worker_harness == "codex"
 
 
 def test_audit_result_validation():

@@ -12,7 +12,7 @@
   ],
   "gate_commands": ["python -m pytest -q"],
   "user_instruction": "两个函数都很小，一次性完成实现和测试，测试全绿即完成。不要修改任何已有文件。",
-  "worker_harness": "claude-code",
+  "worker_harness": "codex",
   "budgets": {
     "max_subtasks": 2,
     "max_total_replans": 2,

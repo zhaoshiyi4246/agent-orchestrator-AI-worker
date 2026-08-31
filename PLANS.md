@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R1 — Provider 迁移与架构事实统一
-- 当前任务：R1-2 — 迁移 Auditor 与 Verifier，复用共享 Codex CLI 边界
-- 当前状态：R1-2 已通过离线测试与两个真实 Provider probe，R1 继续进行
-- 下一步：R1-3 — 验证并迁移 AO Codex Worker harness/model
+- 当前任务：R1-3 — 验证并迁移 AO Codex Worker harness/model
+- 当前状态：R1-3 已通过离线全测、raw AO Worker probe 与 ActionExecutor live smoke，R1 继续进行
+- 下一步：R1-4 — 统一真实架构文档、README 和前端拓扑表述
 
 ## 一、更新规则
 
@@ -122,7 +122,28 @@ R1-2 关闭结论：Auditor 与 Verifier 已迁移到共享 Codex CLI 边界，�
 两个真实 Provider probe 均通过；K15 完全解决。下一独立任务为 R1-3，验证并迁移
 AO Codex Worker harness/model。
 
-## 七、已知问题清单
+## 七、R1-3 验收证据
+
+| 项目 | 结果 |
+|---|---|
+| AO Desktop | Windows 安装版 `0.12.9`；内置 CLI 返回 `ao version dev`，因此产品版本以 Desktop 文件版本为准 |
+| AO CLI / daemon | 使用已安装 AO Desktop 自带的 `resources/daemon/ao.exe`；公开 runfile 为 `%USERPROFILE%\.ao\running.json`，本次 daemon 端口 `3001` |
+| Codex 契约 | `ao spawn --help` 明确列出 harness=`codex`、mode=`chat` 和 session 级 `--model`；`gpt-5.6-sol` 通过 `--model` 显式传递，Conversation settings 记录同一 model |
+| raw AO Worker probe | 已有 `Scratch` Project 中单个 Codex Worker 成功创建，返回非空 Session ID，并精确回复 `R1-3-CODEX-WORKER-READY`；终止后 Scratch 文件树 SHA-256 与仓库 HEAD/工作区基线未变 |
+| raw probe 环境边界 | 在终端 GitHub 443 不可用时，一次 Git Project 预检 spawn 返回 `SPAWN_TIMEOUT`；该空 Session 无 controller/turn/message/worktree 并已终止。成功门禁改用不依赖 GitHub 的已注册 `Scratch` Project，没有进行压力测试 |
+| ActionExecutor live smoke | 临时 `StateStore` + 缺省 `TaskSpec.worker_harness` 调用 `spawn_initial_worker()`；返回非空 Session ID，Worker 精确回复 `R1-3-ACTION-EXECUTOR-ACK`，harness/mode/model 分别为 `codex`/`chat`/`gpt-5.6-sol` |
+| spawn counters | ActionExecutor 成功后 `spawn_attempts`、`spawn_transient`、`spawn_next_at` 均为 `0`，`last_spawn_error` 为空；测试 Worker 已终止 |
+| 代码迁移 | `TaskSpec`/`MissionSpec` 缺省 harness 为 `codex`；生产 Worker model 为 `gpt-5.6-sol`；移除显式 model 被拒后去掉 `--model` 重试的旧 GLM 特殊 fallback |
+| 直接回归 | Worker contract/spawn/budget/idempotency 相关 `50 passed`，退出码 0 |
+| 完整离线测试 | `pytest tests -q`：`295 passed in 32.85s`，退出码 0 |
+| 语法与 diff | `compileall -q src panel run_mission.py` 与 `git diff --check` 均退出 0 |
+| 保留边界 | 未运行完整 Mission；未修改 Worker 数量、Planner/Auditor/Verifier、Verifier 调用频率、状态机、Bus、Panel 或审批策略 |
+
+R1-3 关闭结论：AO Codex Worker 已按本机公开 CLI 契约迁移到
+`codex` + 显式 `--model gpt-5.6-sol`，两个成功 live smoke 与离线全测均通过；
+K16 完全解决。R1 下一独立任务为 R1-4，不直接进入 R2。
+
+## 八、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
 |---|---|---|---|
@@ -140,18 +161,18 @@ AO Codex Worker harness/model。
 | K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已确认：文档声称 247/272，本次实际收集 252 项 |
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
-| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 未解决：具体 AO Codex harness/model 参数仍须在后续独立任务通过本机 live probe 确认 |
-| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 部分解决：生产 Provider 与 `default.yaml` 的三个 role model 已更新；README、旧 ARCHITECTURE 与 Worker 配置仍待处理 |
+| K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：缺省 harness 为已 live probe 验证的 `codex`，生产 model 为显式 `--model gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
+| K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 部分解决：Provider/Worker 运行配置已解决，旧 README/ARCHITECTURE 与前端拓扑待 R1-4 统一 |
 | K18 | `run_mission.py` 与 `llm_env.py` 仍含开发机绝对路径 | R4/R5 | 未解决：R1-2 不扩 scope，仍计划在配置收敛与干净交付阶段处理 |
 
-## 八、阶段边界
+## 九、阶段边界
 
 ### R1
 
 按独立小任务迁移 Provider 并统一事实与展示，不做一次性大重构或大规模删除。
-R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier。下一任务为
-R1-3：依据本机 live probe 验证并迁移 AO Codex Worker harness/model；其后继续
-清理 K17 文档和配置表述。目标：
+R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-3 已依据
+本机 live probe 迁移 AO Codex Worker harness/model。下一任务为 R1-4：统一真实
+架构文档、README 和前端拓扑表述。目标：
 
 - `MissionController` 唯一控制平面；
 - `StateStore` 唯一 CL-AO 状态源；
@@ -196,10 +217,10 @@ R1-3：依据本机 live probe 验证并迁移 AO Codex Worker harness/model；�
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-R1-1、R1-2 已完成；下一独立任务为 R1-3：验证并迁移 AO Codex Worker
-harness/model。
+R1-1、R1-2、R1-3 已完成；下一独立任务为 R1-4：统一真实架构文档、
+README 和前端拓扑表述，完成 R1 收尾。
 
-## 九、停止条件
+## 十、停止条件
 
 出现以下任一情况立即停止当前任务并报告：
 
