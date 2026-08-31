@@ -1,0 +1,13 @@
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+**/runtime/
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+ao-data/
+ao-app/
