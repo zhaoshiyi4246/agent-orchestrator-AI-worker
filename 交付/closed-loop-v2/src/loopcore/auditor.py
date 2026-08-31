@@ -4,9 +4,9 @@ Takes a prepared EvidenceBundle (TaskSpec + alert + events + diff + test output
 + AC status + history) and returns an AuditResult (PASS/LOCAL_FIX/REPLAN/HUMAN).
 
 Providers:
-  FakeAuditorProvider     - deterministic, for unit tests.
-  ClaudeCliAuditorProvider- real `claude -p` headless, --disallowedTools "*"
-                           (no tools), --json-schema structured, budget cap.
+  FakeAuditorProvider    - deterministic, for unit tests.
+  CodexCliAuditorProvider- production auditor via the shared Codex CLI
+                           structured-output boundary.
 
 Auditor is READ-ONLY: it never edits files, runs shell, or controls the Worker.
 On format failure: one retry; second failure -> decision HUMAN.
@@ -14,48 +14,17 @@ On format failure: one retry; second failure -> decision HUMAN.
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from .llm_env import run_claude
+from .codex_cli import run_codex_json
 from .mission_contracts import (AuditResult, AuditEvidence, AuditDecision,
                         validate_audit_result)
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
-
-
-def _resolve_exe(bin_name: str) -> str:
-    """On Windows, npm shims are .cmd files; subprocess without shell=True
-    cannot find 'claude' unless we resolve the full path."""
-    import os
-    import shutil
-    if os.name != "nt":
-        return bin_name
-    if Path(bin_name).exists():
-        return bin_name
-    import shutil
-    resolved = shutil.which(bin_name)
-    if resolved:
-        return resolved
-    # last resort: common npm global dir
-    npm_dir = Path.home() / "AppData" / "Roaming" / "npm"
-    for cand in (npm_dir / (bin_name + ".cmd"), npm_dir / bin_name):
-        if cand.exists():
-            return str(cand)
-    return bin_name
-
-
-def _strip_fences(text: str) -> str:
-    """Strip markdown code fences some models wrap JSON in."""
-    t = (text or "").strip()
-    if t.startswith("```"):
-        t = t.split("\n", 1)[1] if "\n" in t else t[3:]
-    if t.endswith("```"):
-        t = t[:-3]
-    return t.strip()
+SCHEMA_DIR = PROMPT_DIR.parent / "schemas"
 
 
 @dataclass
@@ -127,103 +96,46 @@ class FakeAuditorProvider(AuditorProvider):
             recommended_action=recommended)
 
 
-class ClaudeCliAuditorProvider(AuditorProvider):
-    """Real read-only Claude Code headless auditor.
+class CodexCliAuditorProvider(AuditorProvider):
+    """Production Auditor using ephemeral, read-only Codex CLI calls."""
 
-    claude -p --output-format json --json-schema <audit-result>
-           --disallowedTools "*" --max-budget-usd <n>
-    All tools disabled => cannot edit files / run shell / call MCP.
-    """
-
-    def __init__(self, claude_bin: str = "claude",
-                 budget_usd: float = 0.20, timeout: int = 180,
-                 system_prompt_path: Optional[str] = None,
-                 model: Optional[str] = None):
-        # Self-sufficient env: side entrances (reverify scripts, the web
-        # panel) never see run_mission.py's process-level setup.
-        from .llm_env import ensure_llm_env
-        ensure_llm_env()
-        self.bin = _resolve_exe(claude_bin)
-        self.budget = budget_usd
+    def __init__(self, *, codex_bin: str = "codex", timeout: int = 180,
+                 model: Optional[str] = None, cwd: Optional[Path] = None,
+                 system_prompt_path: Optional[str] = None):
+        self.codex_bin = codex_bin
         self.timeout = timeout
-        sp = system_prompt_path or str(PROMPT_DIR / "auditor.md")
-        with open(sp, encoding="utf-8") as f:
-            self.system_prompt = f.read()
-        with open(PROMPT_DIR.parent / "schemas" / "audit-result.schema.json",
-                  encoding="utf-8") as f:
-            self.schema = json.load(f)
-        # The claude CLI reads ANTHROPIC_MODEL from ~/.claude/settings.json env;
-        # if that points at a gateway model that 403s or fails structured
-        # output, the auditor breaks. Default to GLM-5.2 (verified working on
-        # the ark gateway) unless overridden by the ANTHROPIC_MODEL_AUDITOR env
-        # var or the ctor argument.
-        self.model = model or os.environ.get("ANTHROPIC_MODEL_AUDITOR",
-                                             "GLM-5.2")
-        # Write the system prompt to a temp file once; --system-prompt-file
-        # avoids the Windows ~8k argv cap (the npm shim runs via cmd.exe).
-        import tempfile
-        self._sp_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8")
-        self._sp_file.write(self.system_prompt)
-        self._sp_file.flush()
-        self._sp_path = self._sp_file.name
+        self.model = model or "gpt-5.6-sol"
+        self.cwd = Path(cwd) if cwd is not None else PROMPT_DIR.parent
+        prompt_path = Path(system_prompt_path) if system_prompt_path \
+            else PROMPT_DIR / "auditor.md"
+        self.system_prompt = prompt_path.read_text("utf-8")
+        self.schema_path = SCHEMA_DIR / "audit-result.schema.json"
 
-    def close(self) -> None:
-        """Remove the on-disk system-prompt temp file. Idempotent."""
-        p = self.__dict__.pop("_sp_path", None)
-        if p:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-
-    def _env(self) -> Dict[str, str]:
-        e = dict(os.environ)
-        e["ANTHROPIC_MODEL"] = self.model
-        return e
-
-    def _call(self, bundle: EvidenceBundle, audit_id: str,
-              use_schema: bool = True) -> Dict:
-        prompt = ("Audit this evidence bundle and output ONLY a JSON object "
-                  "matching AuditResult schema. audit_id=%s, task_id=%s.\n\n%s"
-                  % (audit_id, bundle.task_spec.get("task_id", ""),
-                     bundle.to_prompt_text()))
-        # The prompt goes via STDIN, never argv: on Windows the npm shim is a
-        # .cmd script run through cmd.exe, whose command line is capped at
-        # ~8k chars - a large bundle as an argument silently yields empty
-        # stdout.
-        cmd = [self.bin, "-p",
-               "--system-prompt-file", self._sp_path,
-               "--output-format", "json",
-               "--disallowedTools", "*",
-               "--max-budget-usd", str(self.budget)]
-        if use_schema:
-            cmd += ["--json-schema", json.dumps(self.schema)]
-        proc = run_claude(cmd, input=prompt, timeout=self.timeout,
-                          encoding="utf-8", errors="replace", env=self._env())
-        out = (proc.stdout or "").strip()
-        if not out:
-            raise RuntimeError("claude empty stdout rc=%s stderr=%s"
-                               % (proc.returncode, (proc.stderr or "")[:300]))
-        # claude --output-format json wraps the result; try to extract.
-        wrapper = json.loads(out)
-        if isinstance(wrapper, dict) and wrapper.get("is_error"):
-            raise RuntimeError("claude error subtype=%s"
-                               % wrapper.get("subtype"))
-        if isinstance(wrapper, dict) and "result" in wrapper:
-            inner = wrapper["result"]
-            if isinstance(inner, str):
-                return json.loads(_strip_fences(inner))
-            return inner
-        return wrapper
+    def _call(self, bundle: EvidenceBundle, audit_id: str) -> Dict:
+        task_input = json.dumps({
+            "audit_id": audit_id,
+            "task_id": bundle.task_spec.get("task_id", ""),
+            "evidence_bundle": json.loads(bundle.to_prompt_text()),
+            "instruction": ("Output ONLY an AuditResult JSON object matching "
+                            "the schema with the supplied audit_id and "
+                            "task_id."),
+        }, ensure_ascii=False, indent=2)
+        prompt = "%s\n\n# EvidenceBundle input\n%s" % (
+            self.system_prompt, task_input)
+        return run_codex_json(
+            prompt=prompt,
+            schema_path=self.schema_path,
+            model=self.model,
+            timeout=self.timeout,
+            codex_bin=self.codex_bin,
+            cwd=self.cwd,
+        )
 
     def audit(self, bundle: EvidenceBundle, audit_id: str) -> AuditResult:
         last_err = ""
-        # attempt 1: --json-schema structured output; attempt 2: prompt-only
-        # JSON (some gateway models never pass schema-validated retries).
-        for attempt, use_schema in ((0, True), (1, False)):
+        for attempt in range(2):
             try:
-                obj = self._call(bundle, audit_id, use_schema=use_schema)
+                obj = self._call(bundle, audit_id)
                 obj.setdefault("audit_id", audit_id)
                 obj.setdefault("task_id", bundle.task_spec.get("task_id", ""))
                 ok, msg = validate_audit_result(obj)
@@ -242,3 +154,8 @@ class ClaudeCliAuditorProvider(AuditorProvider):
                                     summary=last_err or "auditor invalid output")],
             diagnosis="Auditor failed to produce valid output twice.",
             confidence=0.0, failed_criteria=list(bundle.failed_criteria))
+
+
+# Compatibility for legacy CLI modules outside this migration's edit scope.
+# There is only one production Auditor implementation.
+ClaudeCliAuditorProvider = CodexCliAuditorProvider

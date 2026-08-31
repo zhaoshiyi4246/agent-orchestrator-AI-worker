@@ -7,34 +7,31 @@ Orthogonal to the Auditor:
             (worker modified tests, self-modified ACs, fabricated evidence,
             gate output inconsistent with claims).
 
-Verifiers are READ-ONLY model agents: `claude -p` headless with ALL tools
-disabled. Deterministic findings (path violations, changed-path facts) are
+Verifiers are READ-ONLY model agents using the shared ephemeral Codex CLI
+boundary. Deterministic findings (path violations, changed-path facts) are
 pre-computed by trusted code and injected into the prompt as facts; the model
 does semantic review on top of them — never the reverse.
 
 Providers:
-  FakeVerifierProvider      - deterministic, for unit tests.
-  ClaudeCliVerifierProvider - real `claude -p` headless, GLM-5.2 by default
-                              (ANTHROPIC_MODEL_VERIFIER overrides).
+  FakeVerifierProvider     - deterministic, for unit tests.
+  CodexCliVerifierProvider - production verifier via the shared Codex CLI
+                             structured-output boundary.
 On format failure: one retry; second failure -> verdict FAIL with a format
 note (the loop escalates; a verifier that cannot speak cannot approve).
 """
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .llm_env import run_claude
+from .codex_cli import run_codex_json
 from .mission_contracts import AcCheck, VerifierResult, validate_verifier_result
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
-
-# Reuse the auditor's Windows exe-resolution / fence-stripping helpers.
-from .auditor import _resolve_exe, _strip_fences  # noqa: E402
+SCHEMA_DIR = PROMPT_DIR.parent / "schemas"
 
 
 @dataclass
@@ -100,88 +97,46 @@ class FakeVerifierProvider(VerifierProvider):
                     % (verdict, len(red_flags), gate_bad))
 
 
-class ClaudeCliVerifierProvider(VerifierProvider):
-    """Real read-only verifier via headless claude CLI.
+class CodexCliVerifierProvider(VerifierProvider):
+    """Production Verifier using ephemeral, read-only Codex CLI calls."""
 
-    Same invocation discipline as the auditor: prompt via STDIN (Windows ~8k
-    argv cap), system prompt via --system-prompt-file, all tools disabled,
-    budget cap, two attempts (schema-structured, then prompt-only).
-    """
-
-    def __init__(self, claude_bin: str = "claude",
-                 budget_usd: float = 0.20, timeout: int = 180,
-                 system_prompt_path: Optional[str] = None,
-                 model: Optional[str] = None):
-        from .llm_env import ensure_llm_env
-        ensure_llm_env()
-        self.bin = _resolve_exe(claude_bin)
-        self.budget = budget_usd
+    def __init__(self, *, codex_bin: str = "codex", timeout: int = 180,
+                 model: Optional[str] = None, cwd: Optional[Path] = None,
+                 system_prompt_path: Optional[str] = None):
+        self.codex_bin = codex_bin
         self.timeout = timeout
-        sp = system_prompt_path or str(PROMPT_DIR / "verifier.md")
-        with open(sp, encoding="utf-8") as f:
-            self.system_prompt = f.read()
-        with open(PROMPT_DIR.parent / "schemas" /
-                  "verifier-result.schema.json", encoding="utf-8") as f:
-            self.schema = json.load(f)
-        self.model = model or os.environ.get("ANTHROPIC_MODEL_VERIFIER",
-                                             "GLM-5.2")
-        import tempfile
-        self._sp_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8")
-        self._sp_file.write(self.system_prompt)
-        self._sp_file.flush()
-        self._sp_path = self._sp_file.name
+        self.model = model or "gpt-5.6-sol"
+        self.cwd = Path(cwd) if cwd is not None else PROMPT_DIR.parent
+        prompt_path = Path(system_prompt_path) if system_prompt_path \
+            else PROMPT_DIR / "verifier.md"
+        self.system_prompt = prompt_path.read_text("utf-8")
+        self.schema_path = SCHEMA_DIR / "verifier-result.schema.json"
 
-    def close(self) -> None:
-        """Remove the on-disk system-prompt temp file. Idempotent."""
-        p = self.__dict__.pop("_sp_path", None)
-        if p:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-
-    def _env(self) -> Dict[str, str]:
-        e = dict(os.environ)
-        e["ANTHROPIC_MODEL"] = self.model
-        return e
-
-    def _call(self, inp: VerifierInput, verify_id: str,
-              use_schema: bool = True) -> Dict:
-        prompt = ("Independently verify this result and output ONLY a JSON "
-                  "object matching VerifierResult schema. verify_id=%s, "
-                  "task_id=%s.\n\n%s"
-                  % (verify_id, inp.task_spec.get("task_id", ""),
-                     inp.to_prompt_text()))
-        cmd = [self.bin, "-p",
-               "--system-prompt-file", self._sp_path,
-               "--output-format", "json",
-               "--disallowedTools", "*",
-               "--max-budget-usd", str(self.budget)]
-        if use_schema:
-            cmd += ["--json-schema", json.dumps(self.schema)]
-        proc = run_claude(cmd, input=prompt, timeout=self.timeout,
-                          encoding="utf-8", errors="replace", env=self._env())
-        out = (proc.stdout or "").strip()
-        if not out:
-            raise RuntimeError("claude empty stdout rc=%s stderr=%s"
-                               % (proc.returncode, (proc.stderr or "")[:300]))
-        wrapper = json.loads(out)
-        if isinstance(wrapper, dict) and wrapper.get("is_error"):
-            raise RuntimeError("claude error subtype=%s"
-                               % wrapper.get("subtype"))
-        if isinstance(wrapper, dict) and "result" in wrapper:
-            inner = wrapper["result"]
-            if isinstance(inner, str):
-                return json.loads(_strip_fences(inner))
-            return inner
-        return wrapper
+    def _call(self, inp: VerifierInput, verify_id: str) -> Dict:
+        task_input = json.dumps({
+            "verify_id": verify_id,
+            "task_id": inp.task_spec.get("task_id", ""),
+            "verifier_input": json.loads(inp.to_prompt_text()),
+            "instruction": ("Output ONLY a VerifierResult JSON object "
+                            "matching the schema with the supplied verify_id "
+                            "and task_id."),
+        }, ensure_ascii=False, indent=2)
+        prompt = "%s\n\n# VerifierInput\n%s" % (
+            self.system_prompt, task_input)
+        return run_codex_json(
+            prompt=prompt,
+            schema_path=self.schema_path,
+            model=self.model,
+            timeout=self.timeout,
+            codex_bin=self.codex_bin,
+            cwd=self.cwd,
+        )
 
     def verify(self, inp: VerifierInput, verify_id: str) -> VerifierResult:
         last_err = ""
-        for attempt, use_schema in ((0, True), (1, False)):
+        for attempt in range(2):
             try:
-                obj = self._call(inp, verify_id, use_schema=use_schema)
+                obj = self._call(inp, verify_id)
                 obj.setdefault("verify_id", verify_id)
                 obj.setdefault("task_id", inp.task_spec.get("task_id", ""))
                 self._coerce(obj)
@@ -219,3 +174,8 @@ class ClaudeCliVerifierProvider(VerifierProvider):
                     c["note"] = ""
                 if c.get("verdict") not in ("PASS", "FAIL", "UNVERIFIABLE"):
                     c["verdict"] = "UNVERIFIABLE"
+
+
+# Compatibility for legacy CLI modules outside this migration's edit scope.
+# There is only one production Verifier implementation.
+ClaudeCliVerifierProvider = CodexCliVerifierProvider

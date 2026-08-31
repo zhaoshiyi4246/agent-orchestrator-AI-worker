@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 修正进行中（R0、R1-1 已完成）
+- 状态：R1 修正进行中（R0、R1-1、R1-2 已完成）
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -52,7 +52,7 @@ Integration Gate
 
 R0 必须用入口、import、调用关系和测试复核上述定位。未经证明，不删除任何历史来源目录。
 
-## 三、当前实现：R0/R1-1 代码事实
+## 三、当前实现：R0/R1-2 代码事实
 
 ### 1. 当前主入口与控制路径
 
@@ -79,8 +79,8 @@ run_mission.py main()
 
 `MissionRuntime` 直接创建并注入：
 
-- `CodexCliPlannerProvider`、`ClaudeCliAuditorProvider`、
-  `ClaudeCliVerifierProvider`；
+- `CodexCliPlannerProvider`、`CodexCliAuditorProvider`、
+  `CodexCliVerifierProvider`；
 - `ActionExecutor`、`AOAdapter`、`event_observer.Observer`、
   `mission_gate.IntegrationGate`、`StateStore`；
 - `MissionController`、`LoopBus`、`StoreBusProjector` 和 `ProjectMemory`。
@@ -91,12 +91,15 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
 
 ### 2. 当前角色的真实运行形态
 
-- Planner、Auditor、Verifier 都不是 AO Session。R1-1 已将生产 Planner
-  迁移为 `CodexCliPlannerProvider`：它通过共享 `codex_cli.run_codex_json()`
-  边界，以 stdin、`--ephemeral`、`--sandbox read-only`、现有输出 schema
-  和 `--output-last-message` 调用 Codex CLI，默认模型为可配置的
-  `gpt-5.6-sol`。Auditor 与 Verifier 本轮尚未迁移，仍通过本机
-  `claude -p` 和 `llm_env` 调用旧 Provider。
+- Planner、Auditor、Verifier 都不是 AO Session。R1-1/R1-2 已将三个生产
+  Provider 分别迁移为 `CodexCliPlannerProvider`、`CodexCliAuditorProvider`
+  和 `CodexCliVerifierProvider`；三者复用 `codex_cli.run_codex_json()`，以
+  stdin、`--ephemeral`、`--sandbox read-only`、各自现有输出 schema 和
+  `--output-last-message` 调用 Codex CLI，默认模型均为可配置的
+  `gpt-5.6-sol`。生产主路径不再要求 Claude CLI、`ANTHROPIC_MODEL` 或 GLM
+  网关，也不再调用 `llm_env.ensure_llm_env()`。`llm_env.py` 与旧 Provider
+  类名仅作为待 R2 调用关系审计的兼容遗留；旧类名是 Codex Provider 的简单别名，
+  不保留第二套 Claude 生产实现。
 - Worker 由 `ActionExecutor` 调用 `ao.exe spawn --kind worker` 创建，并通过
   `ao send`、`ao session kill` 管理；当前 `worker_harness` 默认仍为
   `claude-code`，`worker.model` 默认仍为 `GLM-5.2`。
@@ -108,7 +111,7 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   Verifier、Worker、Gate 或 LoopBus，不连接 AO，也不修改用户项目。它仍会
   发起一次真实模型调用，因此不是离线模式；离线覆盖由 mock 测试提供。
 
-共享 Codex runner 是后续 Auditor/Verifier 迁移的复用边界。它不持久化
+共享 Codex runner 是 Planner/Auditor/Verifier 的统一复用边界。它不持久化
 Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试；
 角色 Provider 继续负责一次重试和现有本地 validator 的 fail-closed 语义。
 PlannerAction 的 transport schema 已显式覆盖 REPLAN 所需的非空

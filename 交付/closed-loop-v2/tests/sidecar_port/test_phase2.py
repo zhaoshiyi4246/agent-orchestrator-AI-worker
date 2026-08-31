@@ -3,7 +3,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from loopcore.auditor import (EvidenceBundle, FakeAuditorProvider,
-                         ClaudeCliAuditorProvider)
+                         CodexCliAuditorProvider)
 from loopcore.mission_contracts import (AuditDecision, AuditResult, AuditEvidence,
                            PlannerAction, PlannerActionType, ProjectState,
                            TaskSpec)
@@ -35,8 +35,8 @@ def test_fake_auditor_pass():
 
 
 def test_invalid_auditor_output_to_human():
-    """ClaudeCliAuditor: two invalid outputs -> HUMAN."""
-    prov = ClaudeCliAuditorProvider(claude_bin="fake")
+    """CodexCliAuditor: two invalid outputs -> HUMAN."""
+    prov = CodexCliAuditorProvider(codex_bin="fake")
     # force _call to return invalid dict twice
     prov._call = MagicMock(return_value={"decision": "BOGUS", "evidence": []})
     ar = prov.audit(_bundle(["AC-01"]), "A3")
@@ -48,13 +48,13 @@ def test_invalid_auditor_output_to_human():
 
 
 def test_auditor_one_retry_then_ok():
-    prov = ClaudeCliAuditorProvider(claude_bin="fake")
+    prov = CodexCliAuditorProvider(codex_bin="fake")
     good = {"audit_id": "A4", "task_id": "TASK-DEMO-001",
             "decision": "LOCAL_FIX",
             "evidence": [{"type": "t", "summary": "s"}],
             "diagnosis": "d", "confidence": 0.9}
     calls = iter([{"bad": 1}, good])
-    prov._call = MagicMock(side_effect=lambda b, a, use_schema=True: next(calls))
+    prov._call = MagicMock(side_effect=lambda b, a: next(calls))
     ar = prov.audit(_bundle(["AC-01"]), "A4")
     assert ar.decision == "LOCAL_FIX"
 

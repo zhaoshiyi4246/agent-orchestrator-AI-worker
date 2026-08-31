@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import run_mission
+from loopcore.auditor import CodexCliAuditorProvider
 from loopcore.codex_cli import CodexCliError
 from loopcore.mission_contracts import (
     AuditDecision,
@@ -18,6 +19,7 @@ from loopcore.mission_contracts import (
     PlannerActionType,
 )
 from loopcore.planner_adapter import CodexCliPlannerProvider
+from loopcore.verifier import CodexCliVerifierProvider
 
 
 MISSION = {
@@ -274,6 +276,8 @@ def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
         def __init__(self, mission, cfg, **kwargs):
             self.state = "MISSION_READY"
             self.planner = kwargs["planner"]
+            self.auditor = kwargs["auditor"]
+            self.verifier = kwargs["verifier"]
 
     class DummyProjector:
         def __init__(self, *args, **kwargs):
@@ -285,21 +289,32 @@ def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
     monkeypatch.setattr(run_mission, "AOAdapter", lambda: object())
     monkeypatch.setattr(run_mission, "ActionExecutor", lambda **kwargs: object())
     monkeypatch.setattr(run_mission, "IntegrationGate", lambda store: object())
-    monkeypatch.setattr(run_mission, "ClaudeCliAuditorProvider",
-                        lambda **kwargs: object())
-    monkeypatch.setattr(run_mission, "ClaudeCliVerifierProvider",
-                        lambda **kwargs: object())
     monkeypatch.setattr(run_mission, "MissionController", DummyController)
     monkeypatch.setattr(run_mission, "LoopBus", lambda config: object())
     monkeypatch.setattr(run_mission, "ProjectMemory", DummyMemory)
     monkeypatch.setattr(run_mission, "StoreBusProjector", DummyProjector)
 
-    cfg = {"roles": {"planner": {"model": "configured-model"}}}
+    cfg = {"roles": {
+        "planner": {"model": "planner-model"},
+        "auditor": {"model": "auditor-model"},
+        "verifier": {"model": "verifier-model"},
+    }}
     runtime = run_mission.build_runtime(MISSION, cfg)
 
     assert isinstance(runtime._planner, CodexCliPlannerProvider)
-    assert runtime._planner.model == "configured-model"
+    assert isinstance(runtime._auditor, CodexCliAuditorProvider)
+    assert isinstance(runtime._verifier, CodexCliVerifierProvider)
+    assert runtime._planner.model == "planner-model"
+    assert runtime._auditor.model == "auditor-model"
+    assert runtime._verifier.model == "verifier-model"
     assert runtime.controller.planner is runtime._planner
+    assert runtime.controller.auditor is runtime._auditor
+    assert runtime.controller.verifier is runtime._verifier
+
+    fallback = run_mission.build_runtime(MISSION, {})
+    assert fallback._planner.model == "gpt-5.6-sol"
+    assert fallback._auditor.model == "gpt-5.6-sol"
+    assert fallback._verifier.model == "gpt-5.6-sol"
 
 
 def test_build_planner_uses_default_model_when_config_missing():
@@ -336,7 +351,7 @@ def test_dry_run_outputs_plan_without_runtime_or_ao(monkeypatch, tmp_path,
 
     for name in ("setup_environment", "build_runtime", "MissionRuntime",
                  "StateStore", "AOAdapter", "ActionExecutor",
-                 "ClaudeCliAuditorProvider", "ClaudeCliVerifierProvider",
+                 "CodexCliAuditorProvider", "CodexCliVerifierProvider",
                  "IntegrationGate", "LoopBus"):
         monkeypatch.setattr(run_mission, name, forbidden)
     monkeypatch.setattr(sys, "argv", ["run_mission.py", str(mission_path),
