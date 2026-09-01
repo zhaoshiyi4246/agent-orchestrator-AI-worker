@@ -1,8 +1,8 @@
 """Mission layer tests: decompose -> dispatch N workers -> merge -> DONE.
 
-Fakes only; temp SQLite; no real AO/Claude/git-remote. Verifies the core
+Fakes only; temp SQLite; no real AO/model/git-remote. Verifies the core
 promise: ONE user instruction drives multiple workers through their own
-closed loops to a merged, verified MISSION_DONE — with budgets halting
+closed loops to a merged, final-verified MISSION_DONE — with budgets halting
 runaways.
 """
 import json
@@ -39,7 +39,17 @@ MISSION = {
 }
 
 
-def _mc(tmp_path, *, dry=False):
+class _CountingVerifier:
+    def __init__(self):
+        self.task_ids = []
+
+    def verify(self, inp, verify_id):
+        self.task_ids.append(inp.task_spec.get("task_id") or
+                             inp.task_spec.get("mission_id", ""))
+        return FakeVerifierProvider().verify(inp, verify_id)
+
+
+def _mc(tmp_path, *, dry=False, verifier=None):
     store = StateStore(tmp_path / "m.db")
     adapter = MagicMock()
     adapter.get_recent_events.return_value = []
@@ -50,7 +60,8 @@ def _mc(tmp_path, *, dry=False):
     mc = MissionController(
         mission=MissionSpec.from_dict(MISSION), cfg=_cfg(),
         planner=FakePlannerProvider(), auditor=FakeAuditorProvider(),
-        verifier=FakeVerifierProvider(), executor=ex, adapter=adapter,
+        verifier=verifier or FakeVerifierProvider(), executor=ex,
+        adapter=adapter,
         gate=gate, store=store, dry_run=dry)
     return mc, store
 
@@ -241,7 +252,7 @@ def test_merge_commit_failure_preserves_git_detail(tmp_path):
 
 
 def test_full_mission_to_done_with_merge(tmp_path):
-    """End-to-end fake run: 2 subtasks DONE -> merge -> final verify PASS."""
+    """Task gates skip Verifier; merged Mission still verifies exactly once."""
     import subprocess
     # real mini git repo with two AO Session workspaces
     data_dir = tmp_path / "ao-data"
@@ -265,7 +276,8 @@ def test_full_mission_to_done_with_merge(tmp_path):
         "    if b==0: raise ValueError\n    return a/b\n", encoding="utf-8")
     (wts["sess-S2"] / "math2.py").write_text(
         "def multiply(a,b): return a*b\n", encoding="utf-8")
-    mc, store = _mc(tmp_path)
+    verifier = _CountingVerifier()
+    mc, store = _mc(tmp_path, verifier=verifier)
     mc.adapter.get_session_workspace.side_effect = (
         lambda session_id: str(wts[session_id]))
     mc.step()        # decompose
@@ -274,22 +286,41 @@ def test_full_mission_to_done_with_merge(tmp_path):
         sid = "sess-" + task.task_id[-2:]
         spawned[task.task_id] = sid
         return sid
-    # seed both subtasks as DONE (unit test of the merge/final stage)
+    # Dispatch each dependency in order, then complete it through the real
+    # ClosedLoop Gate PASS transition. The deterministic gate result is fake;
+    # no AO Worker or model process is started.
     with patch.object(mc.executor, "spawn_initial_worker",
                       side_effect=fake_spawn):
         mc.step()    # dispatch S1 only (S2 dep)
     s1 = [s for s in mc.plan.subtasks if not s.dependencies][0].subtask_id
     s2 = [s for s in mc.plan.subtasks if s.dependencies][0].subtask_id
-    store.record_transition(task_id=s1, from_state="WORKER_RUNNING",
-                            to_state="DONE", actor="t", reason="t",
-                            evidence={})
+    gate_ok = MagicMock(ok=True, results=[
+        {"command": "pytest", "stdout": "4 passed", "stderr": ""}],
+        evidence=lambda: [{"type": "integration_gate", "summary": "pass",
+                           "reference": "exit=0"}])
+    with patch.object(IntegrationGate, "run", return_value=gate_ok):
+        mc.loops[s1]._transition(ProjectState.WORKER_RUNNING, "test",
+                                 "worker activity observed", {})
+        mc.loops[s1]._transition(ProjectState.GATE_PENDING, "test",
+                                 "candidate done", {})
+        mc.loops[s1]._run_gate()
+    assert mc._subtask_state(s1) == ProjectState.DONE
+    assert verifier.task_ids == []
     with patch.object(mc.executor, "spawn_initial_worker",
-                      side_effect=fake_spawn):
+                      side_effect=fake_spawn), \
+            patch.object(IntegrationGate, "run", return_value=gate_ok):
         mc.step()    # S2 dispatch; S1 merge happens
     assert s1 in mc.merged, "S1 merged into integration worktree"
-    store.record_transition(task_id=s2, from_state="WORKER_RUNNING",
-                            to_state="DONE", actor="t", reason="t",
-                            evidence={})
+    with patch.object(IntegrationGate, "run", return_value=gate_ok):
+        mc.loops[s2]._transition(ProjectState.WORKER_RUNNING, "test",
+                                 "worker activity observed", {})
+        mc.loops[s2]._transition(ProjectState.GATE_PENDING, "test",
+                                 "candidate done", {})
+        mc.loops[s2]._run_gate()
+    assert mc._subtask_state(s2) == ProjectState.DONE
+    assert verifier.task_ids == []
+    assert store._conn.execute(
+        "SELECT count(*) FROM verifications").fetchone()[0] == 0
     # Merge S2 while its AO Session workspace remains available.
     mc._merge_done()
     assert s2 in mc.merged
@@ -299,11 +330,13 @@ def test_full_mission_to_done_with_merge(tmp_path):
     mc.adapter.get_session_workspace.reset_mock()
     mc.adapter.get_session_workspace.side_effect = AOError(
         "SESSION_WORKSPACE_NOT_FOUND")
-    gate_ok = MagicMock(ok=True, results=[
-        {"command": "pytest", "stdout": "4 passed", "stderr": ""}])
     with patch.object(IntegrationGate, "run", return_value=gate_ok):
         r = mc.step()
     assert r["state"] == "MISSION_DONE"
+    assert verifier.task_ids == [mc.mission.mission_id]
+    verification_rows = store._conn.execute(
+        "SELECT task_id FROM verifications").fetchall()
+    assert verification_rows == [(mc.mission.mission_id,)]
     mc.adapter.get_session_workspace.assert_not_called()
     # merged tree contains both subtask outputs
     integ = Path(store.path).parent / "integration"

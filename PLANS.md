@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：第三次真实 GUI E2E blocker 修复
-- 当前任务：修复 Worker materialization 的 deterministic git-add artifact pathspec bug
-- 当前状态：第三次 GUI E2E 的 Task-level pipeline 全部 PASS；PR #9 保留的 stderr 已将最早 blocker 精确定位为 explicit artifact-exclusion pathspecs 导致 Git 拒绝 ignored `__pycache__`
-- 下一步：本 PR 审计合并后进行第四次同一 GUI smoke；通过后进入 Competition behavior convergence，不直接进入 R2-1
+- 当前阶段：R3 Competition behavior convergence
+- 当前任务：Competition behavior convergence #1 — Task Verifier final-only
+- 当前状态：首次完整 GUI happy path 已到达 `MISSION_DONE`；新 Task Gate PASS 已收敛为直接 DONE，历史 `VERIFIER_PENDING` 与 Mission Final Verifier 保持兼容
+- 下一步：本 PR 审计合并后运行一次同题性能 GUI E2E；Completion Auditor / Planner 优化作为下一项独立任务，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -31,7 +31,7 @@
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
-| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 未开始（完整 E2E 后优先） |
+| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#1 Verifier final-only） |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
@@ -268,6 +268,29 @@ exact pathspec；不扫描 `.`、不将 ignored artifact 传给 `git add`、不�
 `--durations=20` 完整运行 `342 passed in 50.38s`，最慢项为 fake Mission merge
 `5.05s`，本任务未顺带优化测试性能。
 
+### 首次完整 GUI happy path 与 Task Verifier final-only
+
+`MISSION-PANEL-20260901-214216` 首次真实跑通 Planner decomposition → AO Worker →
+Completion Auditor → Planner → Task Gate → Task Verifier → Task DONE → materialization →
+integration → Final Gate → Mission Verifier → `MISSION_DONE`；最终原因为
+`final gate pass + verifier PASS`，总耗时约 `776.9s`。其中 Task Verifier 约 `125s`，
+Mission Verifier 约 `130s`，证明普通子任务默认复核存在明确重复成本。
+
+本次最小收敛只改变新 Task Gate PASS 的目标状态：`GATE_PENDING → DONE`，不调用
+Task Verifier、不生成 task-level verification row。Gate FAIL 仍进入原有
+`AUDIT_PENDING → Auditor → Planner` 路径。`VERIFIER_PENDING` 状态和 verifier 实现
+均未删除；历史 runtime 恢复时继续执行旧 task verifier，semantic FAIL、coherence
+retry、provider retry、budget 与 crash-resume 语义保持。Mission Final Gate 与
+Mission Verifier 不变，完整 fake Mission 证明 Task Verifier 为 0、Mission Verifier
+为 1、最终仍为 `MISSION_DONE`，StateStore 仅写 mission-level verification row。
+
+直接相关回归为 `47 passed in 72.12s`。完整离线基线首次运行
+`343 passed in 152.71s`；因明显慢于近期约 50 秒基线，按要求单独补跑
+`--durations=20`，结果为 `343 passed in 81.41s`，最慢项仍为 fake Mission merge
+与 final-gate/crash-resume 类测试（最慢 `10.51s`）。`compileall`、
+`git diff --check` 与修改文档的新增 Markdown 链接扫描均退出 0；本任务不优化
+测试性能。
+
 ## 十、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
@@ -277,7 +300,7 @@ exact pathspec；不扫描 `.`、不将 ignored artifact 传给 `git add`、不�
 | K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 已确认：主路径与兼容/历史模块同时存在 |
 | K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已确认：面板和示例默认 `max_subtasks=2`，Planner 提示要求 `2..max` |
-| K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 已确认：当前每个子任务和 Mission 终局都调用 Verifier；实际结果回 Controller/Planner 路径 |
+| K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
 | K7 | issue fingerprint 包含 source | R3 | 已确认：`issue_fingerprint()` 返回值显式包含 `source` |
 | K8 | thread 缺少 revision 裁决语义 | R3 | 已确认：同一 issue 只允许一次 verdict，没有 revision 字段或重裁决路径 |
 | K9 | 多套状态与投影没有明确主从 | R1/R2 | 已解决：代码与当前文档均明确 StateStore/AO Worker 事实与后置投影关系；R2 只处理重复实现 |
@@ -319,7 +342,8 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 完整 E2E 后优先做 Competition behavior convergence：
 
 - Worker 默认 1，最多 2；
-- Verifier 默认 final/终局，高风险时可选，不再每个子任务默认调用；
+- Verifier final-only 默认路径已完成：新普通 Task 不调用，历史
+  `VERIFIER_PENDING` 可恢复，Mission 终局调用保留；高风险时的显式按需策略未新增；
 - 隐藏或显式标记 `auto_ff_master` 为实验性高风险功能；
 - 当前 `ClosedLoop` 仍有 bounded L0 direct worker nudge；R3 决定保留该
   fast path，还是将自动 Worker 指令统一路由 Planner；
@@ -347,10 +371,10 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-当前顺序固定为：workspace API PR → demo bootstrap + GUI E2E → Competition behavior
-convergence → 重复模块清理 → clean delivery/installer/first-run。R1-1、R1-2、
-R1-3、R1-4 与 R2-0 主体已完成；本轮不启动 E2E、Worker/Verifier 策略调整或
-R2 删除。
+当前顺序固定为：Competition behavior convergence → 重复模块清理 → clean
+delivery/installer/first-run。R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；
+Verifier final-only 是当前 Competition convergence #1，合并后才运行一次同题
+性能 E2E，本轮不运行真实 AO Worker/GUI E2E，也不启动 R2 删除。
 
 ## 十二、停止条件
 

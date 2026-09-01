@@ -97,7 +97,7 @@ class _RecordingVerifier:
 
 
 def test_head_mutation_reaches_verifier_findings(tmp_path, monkeypatch):
-    """Loop-level: a mutating gate must surface a deterministic finding."""
+    """Historical task verification preserves gate-mutation evidence."""
     store = StateStore(str(tmp_path / "cl.db"))
     task = TaskSpec.from_dict(_task_spec())
     task.worker_session_id = "w-mut"
@@ -117,7 +117,8 @@ def test_head_mutation_reaches_verifier_findings(tmp_path, monkeypatch):
                       store=store, verifier=verifier)
     loop._transition(ProjectState.WORKER_RUNNING, "test", "setup", {})
     loop._transition(ProjectState.GATE_PENDING, "test", "setup", {})
-    loop._run_gate()
+    loop._transition(ProjectState.VERIFIER_PENDING, "test", "historical", {})
+    loop._run_verifier()
     assert verifier.inputs, "verifier must have been invoked"
     findings = verifier.inputs[0].deterministic_findings
     assert any("mutated HEAD" in f for f in findings), findings

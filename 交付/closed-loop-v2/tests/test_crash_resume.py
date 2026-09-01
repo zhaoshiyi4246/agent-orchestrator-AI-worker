@@ -2,7 +2,7 @@
 handler instead of parking forever.
 
 A process killed mid-chain (tool timeout / Ctrl-C) between two hops of the
-synchronous audit -> planner -> execute -> gate -> verifier chain leaves the
+synchronous audit -> planner -> execute -> gate chain leaves the
 loop in a pending state that no poll branch used to pick up (real-run
 evidence: MISSION-QUICK-006 S2 sat in PLANNER_PENDING for 4+ minutes after a
 mid-planner kill). Each test parks the loop in one such state with only the
@@ -93,14 +93,17 @@ def _pass_audit(task_id):
 
 
 def test_verifier_pending_reenters_verifier(tmp_path, monkeypatch):
-    """Simulates a crash after 'gate pass' but before the verifier answered."""
+    """A historical VERIFIER_PENDING row still invokes its task verifier."""
     loop, store = _parked_loop(tmp_path, monkeypatch,
                                ProjectState.VERIFIER_PENDING)
+    verifier = MagicMock(wraps=FakeVerifierProvider())
+    loop.verifier = verifier
     assert loop.state == ProjectState.VERIFIER_PENDING
     assert not store.verification_seen("any")  # nothing recorded yet
     result = loop.step()
     assert result["acted"] is True
     assert loop.state == ProjectState.DONE  # FakeVerifierProvider passes
+    verifier.verify.assert_called_once()
     verifications = store._conn.execute(
         "SELECT verify_id FROM verifications").fetchall()
     assert len(verifications) == 1
@@ -113,8 +116,8 @@ def test_audit_pending_reenters_completion_audit(tmp_path, monkeypatch):
     assert loop.state == ProjectState.AUDIT_PENDING
     result = loop.step()
     assert result["acted"] is True
-    # FakeAuditor sees a green gate -> PASS -> planner CANDIDATE_DONE ->
-    # gate -> verifier: the whole chain completes in one resumed step.
+    # FakeAuditor sees a green gate -> PASS -> planner CANDIDATE_DONE -> gate;
+    # the whole chain completes in one resumed step.
     assert loop.state == ProjectState.DONE
     audits = store._conn.execute("SELECT audit_id FROM audits").fetchall()
     assert len(audits) == 1
@@ -197,7 +200,7 @@ def test_planner_pending_resumes_planner(tmp_path, monkeypatch):
     assert not store.action_seen("ACTION-CRASH-1")
     result = loop.step()
     assert result["acted"] is True
-    # PASS audit -> CANDIDATE_DONE -> gate -> verifier -> DONE
+    # PASS audit -> CANDIDATE_DONE -> gate -> DONE
     assert loop.state == ProjectState.DONE
     actions = store._conn.execute(
         "SELECT action_id FROM planner_actions").fetchall()
@@ -264,7 +267,7 @@ def test_gate_pending_resumes_gate(tmp_path, monkeypatch):
                                ProjectState.GATE_PENDING)
     result = loop.step()
     assert result["acted"] is True
-    assert loop.state == ProjectState.DONE  # gate pass -> verifier PASS
+    assert loop.state == ProjectState.DONE  # gate PASS completes directly
     runs = store._conn.execute(
         "SELECT command FROM gate_runs WHERE command != 'path-gate'"
     ).fetchall()
