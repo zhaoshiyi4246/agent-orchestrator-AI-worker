@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；第二次真实 GUI E2E 已验证到 Task DONE，并暴露 Worker materialization commit 的瞬时失败与错误证据丢失边界；当前修复待合并后进行第三次 GUI smoke
+- 状态：R1 与 R2-0 主链已完成；第三次真实 GUI E2E 已验证到 Task DONE，并由 PR #9 的错误证据定位 deterministic git-add artifact pathspec bug；当前修复待合并后进行第四次 GUI smoke
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -140,11 +140,14 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   `runtime/<mission-id>/integration`（即 StateStore 同目录的 `integration`）。
   最终 Gate/Verifier 直接复用该路径，不依赖已终止 Worker 的 AO workspace。
 - Task DONE 后的 trusted sidecar materialization commit 是确定性 Git 操作。
-  `commit_all()` 对有改动的 worktree 最多执行 2 次完整 `git add` → `git commit`：
-  第一次失败后只短暂等待并重试一次；persistent failure 以包含有界 Git
-  stdout/stderr 的明确异常 fail closed，由 Mission 记录到现有 reason/evidence 并转
-  `HUMAN`，不会继续创建 integration。该路径不写 Git config、不使用
-  `--no-verify`、不关闭 signing，也不绕过用户 repository 的 hook/signing policy。
+  `commit_all()` 只使用 `changed_paths()` 返回的非 artifact 路径，并以 literal exact
+  pathspec 执行 `git add -A`；不扫描整个 `.`，也不把 artifact exclusion pathspec
+  传给写命令。用户自定义 ignore policy 继续生效，绝不使用 `-f` 强行加入 ignored
+  文件。有改动的 worktree 最多执行 2 次完整 `git add` → `git commit`：第一次失败
+  后只短暂等待并重试一次；persistent failure 以包含有界 Git stdout/stderr 的明确
+  异常 fail closed，由 Mission 记录到现有 reason/evidence 并转 `HUMAN`，不会继续
+  创建 integration。该路径不写 Git config、不使用 `--no-verify`、不关闭 signing，
+  也不绕过用户 repository 的 hook/signing policy。
 - `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
   只创建生产 Codex Planner，输出结构化 MissionPlan 并直接退出。该路径不
   创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、

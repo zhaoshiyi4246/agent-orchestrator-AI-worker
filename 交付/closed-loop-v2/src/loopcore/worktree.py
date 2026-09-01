@@ -341,22 +341,22 @@ def commit_all(worktree: str, message: str) -> str:
     if not head:
         raise RuntimeError("git inspection failed: unable to read current HEAD")
 
-    # exclude artifacts from the commit (they'd collide across worktrees):
-    # the add itself carries the exclude pathspecs — `git add -A -- .` alone
-    # would still sweep __pycache__/*.pyc into the integration branch and
-    # same-file binary conflicts would surface as spurious Planner CONFLICTs.
+    # changed_paths already filters artifacts and honors Git's ignore policy
+    # for untracked files. Stage only those exact materializable paths: adding
+    # "." plus explicit artifact exclusions makes Git reject an ignored
+    # __pycache__ directory on real AO worktrees (MISSION-PANEL-20260901-200228).
     changed = changed_paths(worktree, head)
     if changed is None:
         raise RuntimeError(
             "git inspection failed: unable to inspect Worker changes")
     if not changed:
         return head
+    pathspecs = [":(literal)%s" % path for path in changed]
 
     last_stage = "git commit"
     last_detail = ""
     for attempt in range(2):
-        ok, detail = _git_check(worktree, "add", "-A", "--", ".",
-                                *_ARTIFACT_EXCLUDES)
+        ok, detail = _git_check(worktree, "add", "-A", "--", *pathspecs)
         if not ok:
             last_stage, last_detail = "git add", detail
         else:

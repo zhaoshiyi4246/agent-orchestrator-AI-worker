@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：第二次真实 GUI E2E blocker 修复
-- 当前任务：保留 Worker materialization Git 错误证据，并对瞬时本地 Git failure 做一次有界重试
-- 当前状态：第二次 GUI E2E 已验证 Panel → Planner → AO Worker → completion audit → Planner → Task Gate → Task Verifier → Task DONE；新的最早 blocker 是 Worker materialization commit 的一次性失败，原 stderr 未持久化且事后无法复现
-- 下一步：本 PR 审计合并后进行第三次同一 GUI smoke；通过后进入 Competition behavior convergence，不直接进入 R2-1
+- 当前阶段：第三次真实 GUI E2E blocker 修复
+- 当前任务：修复 Worker materialization 的 deterministic git-add artifact pathspec bug
+- 当前状态：第三次 GUI E2E 的 Task-level pipeline 全部 PASS；PR #9 保留的 stderr 已将最早 blocker 精确定位为 explicit artifact-exclusion pathspecs 导致 Git 拒绝 ignored `__pycache__`
+- 下一步：本 PR 审计合并后进行第四次同一 GUI smoke；通过后进入 Competition behavior convergence，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -244,6 +244,29 @@ identity/GPG/hook/lock bug，也不针对这些未经证明的原因改写 Git p
 merged 保持为空。该路径不写 Git config、不使用 `--no-verify`，也不改变用户 hook
 或 signing policy。完整离线基线为 `336 passed in 293.08s`；`compileall` 与
 `git diff --check` 均退出 0。第三次真实 GUI E2E 尚待本 PR 审计合并后运行。
+
+### 第三次真实 GUI E2E 与 exact-path materialization
+
+`MISSION-PANEL-20260901-200228` 再次真实验证 Panel → Planner → AO Worker →
+completion audit → Planner → Task Gate → Task Verifier → Task DONE。Worker 正确实现
+`clamp01_e2e`，修改已 staged，Task Gate 与 Task Verifier 均 PASS；Mission 在创建
+integration 前因 materialization `git add` persistent failure 转 `HUMAN`。
+
+PR #9 已正确执行两次有界 materialization attempt，并将最后一次真实 stderr 写入
+Mission reason，因此本次根因可以明确更新为
+`DETERMINISTIC_GIT_ADD_ARTIFACT_PATHSPEC_BUG`：`commit_all()` 在已经由
+`changed_paths()` 过滤 artifact 后，仍执行 `git add -A -- .` 加显式 artifact
+exclusion pathspec；真实 worktree 同时存在 ignored `__pycache__` 时，Git 以
+ignored-path error nonzero。两次 retry 均执行了同一确定性错误命令，故不能恢复；
+这不是瞬时 Git fault。
+
+当前最小修复只 stage `changed_paths()` 返回的真实非 artifact 路径，并使用 literal
+exact pathspec；不扫描 `.`、不将 ignored artifact 传给 `git add`、不使用 `-f`，
+也不修改 `.gitignore`、`.git/info/exclude` 或 Git config。PR #9 的两次上限 retry、
+0.5 秒等待、stderr preservation 与 persistent `RuntimeError` 全部保留。直接相关
+回归 24 项全部通过；完整离线基线 `342 passed in 50.80s`；单独的
+`--durations=20` 完整运行 `342 passed in 50.38s`，最慢项为 fake Mission merge
+`5.05s`，本任务未顺带优化测试性能。
 
 ## 十、已知问题清单
 
