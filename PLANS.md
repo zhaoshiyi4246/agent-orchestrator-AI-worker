@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R2-0 — AO 主运行路径可移植性
-- 当前任务：通过 AO 官方 Session workspace API 修复正常 Mission 主链（本 PR 已实现并完成离线验证）
-- 当前状态：AO executable、runfile、Worker workspace 主生产契约已解除开发机绝对路径/内部目录推导绑定；live workspace transport probe 等待 AO Desktop/daemon 运行
-- 下一步：本 PR 审计合并后进入 demo bootstrap + GUI E2E；随后优先做 Competition behavior convergence，不直接进入 R2-1
+- 当前阶段：第一次真实 GUI E2E blocker 修复
+- 当前任务：修复 active Worker 的语义审计时序，以及 Auditor/Verifier provider failure 与业务 verdict 的边界
+- 当前状态：GUI E2E 已验证 Panel → Planner → AO Codex Worker → official Session workspace API → Observer；Worker 实现正确，失败来自过早 audit 与 transport timeout 被伪装成 semantic HUMAN
+- 下一步：本 PR 审计合并后重跑同一 GUI smoke；通过后进入 Competition behavior convergence，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -198,6 +198,32 @@ workspace 均已移除开发者绝对路径或内部目录推导绑定。这不�
 归 clean-delivery，AO 首次配置 UX 归比赛 UX/clean-delivery，Project 注册/选择归
 比赛 UX/R4，`auto_ff_master` legacy data root 归 Competition convergence/R4。
 当前下一步是 demo bootstrap + GUI E2E，随后优先做比赛行为收敛，不直接开始 R2-1。
+
+### 第一次真实 GUI E2E 与语义角色恢复
+
+`MISSION-PANEL-20260901-140528` 已真实跑通 Panel → Planner → AO Codex Worker
+（harness=`codex`、model=`gpt-5.6-sol`）→ AO official Session workspace API →
+Observer。Worker 最终正确实现 `clamp01_e2e`，自身验收命令退出 0，只修改
+`app.py` 并回复 DONE，因此本次终局不得分类为 Worker implementation failure。
+
+该次运行确认两个最早 blocker：
+
+1. Worker 的 AO turn 仍为 active/reconnecting 时，三个同 fingerprint provider
+   error 被 Observer 正确记录为 `REPEATED_ERROR`，但 Controller 立即进入
+   `AUDIT_PENDING`，导致语义审计捕获到编辑完成前的红 Gate 证据；
+2. Auditor 的两次 120 秒 Codex transport failure 被 Provider 构造成 semantic
+   `HUMAN`（`auditor_format_failure`），Planner 随后合法执行该错误业务结论。
+
+当前最小修复保持 Observer 与 StateStore 事实不变：active turn 的
+`REPEATED_ERROR` 只记录、不触发语义干预；完成后仍走现有 completion audit，读取
+最新 workspace/diff/Gate evidence。Auditor/Verifier 的 transport failure 立即抛给
+现有 Controller step boundary；schema-invalid 只在 Provider 内重试一次，第二次
+仍失败则抛 provider protocol error；合法 semantic `HUMAN`/`FAIL` 保持原语义。
+三个 Codex role 的生产 timeout 统一为 180 秒。现有 bounded retry 连续三次失败
+才转 `consecutive loop errors` HUMAN，不新增 retry verdict、状态、队列或数据表。
+直接相关回归 `61 passed in 17.76s`；完整离线基线
+`326 passed in 40.09s`；`compileall` 与 `git diff --check` 均退出 0。本节只记录
+已发生的 E2E 与已实现/离线验证边界；修复后的 GUI E2E 尚待本 PR 合并后重跑。
 
 ## 十、已知问题清单
 

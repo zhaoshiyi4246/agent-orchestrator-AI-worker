@@ -150,10 +150,10 @@ class MissionRuntime:
         verifier_cfg = roles.get("verifier") or {}
         auditor = CodexCliAuditorProvider(
             model=auditor_cfg.get("model") or "gpt-5.6-sol",
-            timeout=120, cwd=ROOT)
+            timeout=180, cwd=ROOT)
         verifier = CodexCliVerifierProvider(
             model=verifier_cfg.get("model") or "gpt-5.6-sol",
-            timeout=120, cwd=ROOT)
+            timeout=180, cwd=ROOT)
         # Keep references for lifecycle introspection and compatibility with
         # any provider that exposes optional cleanup.
         self._planner = planner

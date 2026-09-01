@@ -2,8 +2,11 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from loopcore.auditor import (EvidenceBundle, FakeAuditorProvider,
                          CodexCliAuditorProvider)
+from loopcore.codex_cli import CodexCliError
 from loopcore.mission_contracts import (AuditDecision, AuditResult, AuditEvidence,
                            PlannerAction, PlannerActionType, ProjectState,
                            TaskSpec)
@@ -34,17 +37,14 @@ def test_fake_auditor_pass():
     assert ar.decision == AuditDecision.PASS
 
 
-def test_invalid_auditor_output_to_human():
-    """CodexCliAuditor: two invalid outputs -> HUMAN."""
+def test_invalid_auditor_output_raises_protocol_error():
+    """Two invalid outputs are provider failure, not semantic HUMAN."""
     prov = CodexCliAuditorProvider(codex_bin="fake")
     # force _call to return invalid dict twice
     prov._call = MagicMock(return_value={"decision": "BOGUS", "evidence": []})
-    ar = prov.audit(_bundle(["AC-01"]), "A3")
-    assert ar.decision == AuditDecision.HUMAN
-    assert ar.evidence
-    assert "format" in ar.evidence[0].summary.lower() or \
-           "invalid" in ar.evidence[0].summary.lower() or \
-           "schema" in ar.evidence[0].summary.lower()
+    with pytest.raises(CodexCliError, match="schema-invalid output twice"):
+        prov.audit(_bundle(["AC-01"]), "A3")
+    assert prov._call.call_count == 2
 
 
 def test_auditor_one_retry_then_ok():

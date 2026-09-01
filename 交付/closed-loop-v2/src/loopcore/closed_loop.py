@@ -315,11 +315,27 @@ class ClosedLoop:
         if self.state == ProjectState.TASK_READY and events:
             self._transition(ProjectState.WORKER_RUNNING, "observer",
                              "worker activity observed", {})
-        if new_alerts:
+        # A REPEATED_ERROR is still a durable Observer fact, but an active AO
+        # turn is not stable semantic evidence yet.  Do not interrupt the
+        # turn (AO rejects mid-turn remediation) or capture a pre-edit gate;
+        # once AO reports idle/exited, the existing quiet-completion path
+        # audits the latest workspace instead.  Unknown status fails closed
+        # to the established alert path; only an explicit activity=active
+        # defers it.  NO_PROGRESS semantics are intentionally unchanged.
+        active_repeated_error = False
+        if new_alerts and any(
+                getattr(alert, "alert_type", "") == "REPEATED_ERROR"
+                for alert in new_alerts):
+            worker_status = self._worker_status()
+            active_repeated_error = (
+                isinstance(worker_status, dict)
+                and isinstance(worker_status.get("activity"), dict)
+                and worker_status["activity"].get("state") == "active")
+        if new_alerts and not active_repeated_error:
             # L1: project-level semantic failure -> Auditor + Planner.
             result["acted"] = True
             self._handle_alerts(new_alerts, events)
-        else:
+        elif not new_alerts:
             acted_l0 = False
             if fresh_errors and self.state == ProjectState.WORKER_RUNNING:
                 # L0: a single/local execution failure (not yet repeated).

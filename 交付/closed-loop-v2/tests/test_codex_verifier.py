@@ -70,19 +70,18 @@ def test_verify_uses_shared_runner_and_returns_valid_result(
     assert "diff --git a/app.py" in call["prompt"]
 
 
-def test_verify_retries_once_after_transport_failure(monkeypatch):
+def test_verify_transport_failure_propagates_without_retry(monkeypatch):
     provider = CodexCliVerifierProvider()
-    values = iter([CodexCliError("temporary"), _result()])
+    calls = []
 
     def fake_call(*args, **kwargs):
-        value = next(values)
-        if isinstance(value, Exception):
-            raise value
-        return value
+        calls.append(1)
+        raise CodexCliError("timeout")
 
     monkeypatch.setattr(provider, "_call", fake_call)
-    monkeypatch.setattr("loopcore.verifier.time.sleep", lambda _: None)
-    assert provider.verify(_input(), "VERIFY-CODEX").verdict == "PASS"
+    with pytest.raises(CodexCliError, match="timeout"):
+        provider.verify(_input(), "VERIFY-CODEX")
+    assert len(calls) == 1
 
 
 def test_invalid_verifier_result_is_retried(monkeypatch):
@@ -115,15 +114,24 @@ def test_verifier_coerce_still_applies_before_local_validation(monkeypatch):
     assert result.anti_gaming[0].verdict == "UNVERIFIABLE"
 
 
-def test_two_verifier_failures_fall_back_to_fail(monkeypatch):
+def test_two_schema_invalid_verifier_results_raise_protocol_error(monkeypatch):
     provider = CodexCliVerifierProvider()
-    monkeypatch.setattr(
-        provider, "_call",
-        lambda *a, **k: (_ for _ in ()).throw(CodexCliError("offline")))
+    calls = []
+
+    def invalid(*args, **kwargs):
+        calls.append(1)
+        return {}
+
+    monkeypatch.setattr(provider, "_call", invalid)
     monkeypatch.setattr("loopcore.verifier.time.sleep", lambda _: None)
+    with pytest.raises(CodexCliError, match="schema-invalid output twice"):
+        provider.verify(_input(), "VERIFY-CODEX")
+    assert len(calls) == 2
 
+
+def test_valid_semantic_fail_remains_fail(monkeypatch):
+    provider = CodexCliVerifierProvider()
+    monkeypatch.setattr(provider, "_call", lambda *a, **k: _result("FAIL"))
     result = provider.verify(_input(), "VERIFY-CODEX")
-
     assert result.verdict == "FAIL"
-    assert result.verify_id == "VERIFY-CODEX"
-    assert "invalid output" in result.summary
+    assert result.summary == "failed AC-1"

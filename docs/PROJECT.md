@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 已完成；R2-0 已将 AO executable、runfile 与 Worker workspace 收敛到可移植/官方运行时契约；待本 PR 审计合并后进入 demo bootstrap + GUI E2E
+- 状态：R1 与 R2-0 主链已完成；第一次真实 GUI E2E 已验证到 AO Codex Worker/Observer，并暴露 active-turn 语义审计时序与 Codex role failure 边界 blocker；当前修复待合并后重跑 GUI smoke
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -146,8 +146,12 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   发起一次真实模型调用，因此不是离线模式；离线覆盖由 mock 测试提供。
 
 共享 Codex runner 是 Planner/Auditor/Verifier 的统一复用边界。它不持久化
-Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试；
-角色 Provider 继续负责一次重试和现有本地 validator 的 fail-closed 语义。
+Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试。
+Auditor/Verifier 对 `CodexCliError` transport failure 立即向 Controller 抛出；
+完整 JSON 的 schema/local-validator failure 可在角色 Provider 内重试一次，第二次
+仍无效则作为 provider protocol error 抛出。两类运行错误都不得构造 Auditor
+`HUMAN` 或 Verifier `FAIL`；只有通过本地验证的合法语义输出才形成业务裁决。
+Auditor、Verifier 与 Planner 的生产调用 timeout 均为 180 秒。
 PlannerAction 的 transport schema 已显式覆盖 REPLAN 所需的非空
 `replacement_task_spec.objective`；共享 runner 不再把未声明 `properties` 的
 object schema 静默收窄为空对象，而是在启动 Codex 前 fail closed。
@@ -156,11 +160,23 @@ object schema 静默收窄为空对象，而是在启动 Codex 前 fail closed�
 高风险场景按需调用是 R3 目标。当前 Mission 也仍允许多个子任务；默认 1 个
 Worker、必要时最多 2 个是 R3 目标，不是 R1 已实现事实。
 
-当前 `ClosedLoop` 还保留一条 deterministic L0 fast path：fresh local error 在
+Observer alert 是持久化运行事实，不等于立即执行语义干预。当前 `ClosedLoop`
+对 `REPEATED_ERROR` 增加了一条严格时序边界：若 AO 明确报告
+`activity.state=active`，alert 仍写入 StateStore，但不调用 `_handle_alerts`、
+Auditor、Planner、Gate capture 或 Worker 消息，Task 保持 `WORKER_RUNNING`。
+Worker 后续进入 idle/waiting/exited/terminated 后，仍复用现有 approval、
+quiet-completion/completion-audit 路径，以届时最新 workspace、diff 与 Gate 证据
+裁决；不新增 deferred queue、状态或数据表。非 active 的 `REPEATED_ERROR` 与
+`NO_PROGRESS` 行为不在本次改变范围。
+
+`ClosedLoop` 还保留一条 deterministic L0 fast path：fresh local error 在
 任务仍为 `WORKER_RUNNING`、Worker 不处于进行中的 turn、孵化 grace 已满足且
 fingerprint 尚未发送过时，可以直接调用 `ActionExecutor.nudge_worker()`，不经过
 Auditor 或 Planner。每个 fingerprint 最多发送一次；重复问题产生 L1 alert 后仍
-升级到 Auditor → Planner。该路径属于 MissionController 直接组装的 `ClosedLoop`
+在上述 active-turn 边界之外升级到 Auditor → Planner。Provider transport/protocol
+exception 则由 `ClosedLoop.step()` / `MissionController.step()` 现有连续错误边界
+跨 tick 重试；一次成功 tick 清零 streak，连续 3 次错误才以
+`consecutive loop errors` 转 HUMAN。该路径属于 MissionController 直接组装的 `ClosedLoop`
 控制层，不是第二个控制平面。R3 将决定保留该 fast path，还是统一路由 Planner。
 
 `llm_env.py`、旧 Provider 类名兼容别名、旧审批回归注释，以及
