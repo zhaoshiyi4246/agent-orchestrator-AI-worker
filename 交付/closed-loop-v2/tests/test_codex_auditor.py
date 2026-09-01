@@ -75,20 +75,18 @@ def test_audit_uses_shared_runner_and_returns_valid_result(
     assert "AssertionError: divide is not implemented" in call["prompt"]
 
 
-def test_audit_retries_once_after_transport_failure(monkeypatch):
+def test_audit_transport_failure_propagates_without_retry(monkeypatch):
     provider = CodexCliAuditorProvider()
-    values = iter([CodexCliError("temporary"), _result()])
+    calls = []
 
     def fake_call(*args, **kwargs):
-        value = next(values)
-        if isinstance(value, Exception):
-            raise value
-        return value
+        calls.append(1)
+        raise CodexCliError("timeout")
 
     monkeypatch.setattr(provider, "_call", fake_call)
-    monkeypatch.setattr("loopcore.auditor.time.sleep", lambda _: None)
-    assert provider.audit(_bundle(["AC-1"]), "AUD-CODEX").decision == \
-        AuditDecision.LOCAL_FIX
+    with pytest.raises(CodexCliError, match="timeout"):
+        provider.audit(_bundle(["AC-1"]), "AUD-CODEX")
+    assert len(calls) == 1
 
 
 def test_invalid_audit_result_is_retried(monkeypatch):
@@ -107,18 +105,27 @@ def test_invalid_audit_result_is_retried(monkeypatch):
     assert len(calls) == 2
 
 
-def test_two_audit_failures_fall_back_to_human(monkeypatch):
+def test_two_schema_invalid_audit_results_raise_protocol_error(monkeypatch):
     provider = CodexCliAuditorProvider()
-    monkeypatch.setattr(
-        provider, "_call",
-        lambda *a, **k: (_ for _ in ()).throw(CodexCliError("offline")))
+    calls = []
+
+    def invalid(*args, **kwargs):
+        calls.append(1)
+        return {"decision": "BOGUS", "evidence": []}
+
+    monkeypatch.setattr(provider, "_call", invalid)
     monkeypatch.setattr("loopcore.auditor.time.sleep", lambda _: None)
+    with pytest.raises(CodexCliError, match="schema-invalid output twice"):
+        provider.audit(_bundle(["AC-1"]), "AUD-CODEX")
+    assert len(calls) == 2
 
+
+def test_valid_semantic_human_remains_human(monkeypatch):
+    provider = CodexCliAuditorProvider()
+    monkeypatch.setattr(provider, "_call", lambda *a, **k: _result("HUMAN"))
     result = provider.audit(_bundle(["AC-1"]), "AUD-CODEX")
-
     assert result.decision == AuditDecision.HUMAN
-    assert result.evidence
-    assert result.failed_criteria == ["AC-1"]
+    assert result.diagnosis == "local fix needed"
 
 
 def test_fake_auditor_behavior_is_unchanged():

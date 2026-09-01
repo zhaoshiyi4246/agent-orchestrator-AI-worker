@@ -16,10 +16,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from loopcore import worktree as wt
+from loopcore.codex_cli import CodexCliError
 from loopcore.mission_gate import IntegrationGate
 from loopcore.test_failures import extract_failure_ids
 from tests.sidecar_port.test_mission import _mc
 from loopcore.mission_contracts import ProjectState
+from loopcore.verifier import FakeVerifierProvider
 
 
 def _git(cwd, *a):
@@ -146,3 +148,42 @@ def test_final_gate_new_failure_is_fatal(tmp_path):
     with patch.object(IntegrationGate, "run", return_value=gate_red_new):
         r = mc.step()
     assert r["state"] == "HUMAN"
+
+
+def test_final_verifier_transport_failure_retries_next_tick(tmp_path):
+    """A merged mission is not rejected for one verifier transport outage."""
+    mc, store, data_dir = _seed_done_mission(tmp_path)
+
+    class FlakyVerifier:
+        calls = 0
+
+        def verify(self, inp, verify_id):
+            self.calls += 1
+            if self.calls == 1:
+                raise CodexCliError("final verifier timed out")
+            return FakeVerifierProvider().verify(inp, verify_id)
+
+    flaky = FlakyVerifier()
+    mc.verifier = flaky
+    gate_pass = MagicMock(ok=True, results=[{
+        "command": "python -m pytest -q", "stdout": "2 passed\n",
+        "stderr": ""}])
+
+    with patch.object(IntegrationGate, "run", return_value=gate_pass):
+        first = mc.step()
+        integration = Path(store.path).parent / "integration"
+        head_after_merge = _git(integration, "rev-parse", "HEAD").stdout.strip()
+        second = mc.step()
+
+    assert first["acted"] is False
+    assert "CodexCliError: final verifier timed out" in first["error"]
+    assert first["state"] not in ("MISSION_DONE", "HUMAN", "FAILED")
+    assert integration.is_dir()
+    assert len(mc.merged) == len(mc.tasks)
+    assert store._conn.execute(
+        "SELECT count(*) FROM verifications").fetchone()[0] == 1
+    assert second["state"] == "MISSION_DONE"
+    assert flaky.calls == 2
+    assert mc._loop_error_streak == 0
+    assert _git(integration, "rev-parse", "HEAD").stdout.strip() == \
+        head_after_merge

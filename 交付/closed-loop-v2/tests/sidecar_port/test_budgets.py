@@ -200,6 +200,83 @@ def test_l1_alert_shadows_l0(tmp_path):
     loop.executor.nudge_worker.assert_not_called()
 
 
+def test_active_repeated_error_waits_for_completion_evidence(tmp_path):
+    """A real L1 alert is durable, but never audits an active AO turn."""
+    loop, task, store = _loop(tmp_path, budgets={
+        "max_local_fixes": 5, "max_replans": 1, "max_same_alerts": 5,
+        "max_runtime_seconds": 1800})
+    loop._transition(ProjectState.WORKER_RUNNING, "test", "setup", {})
+    loop.adapter.get_worker_conversation.return_value = {"activities": []}
+    loop.adapter.get_worker_status.return_value = {
+        "id": task.worker_session_id, "status": "running",
+        "activity": {"state": "active"}}
+    errors = [
+        ev("2026-08-27T00:0%d:00Z" % i,
+           project=task.project_id, worker=task.worker_session_id,
+           etype="error", message="provider transport failed",
+           fingerprint="provider-fp")
+        for i in range(3)
+    ]
+    loop._collect_events = MagicMock(return_value=errors)
+    loop.auditor = MagicMock()
+    loop.planner = MagicMock()
+    loop.executor.nudge_worker = MagicMock()
+    loop.executor.execute = MagicMock()
+    loop._run_gate_capture = MagicMock()
+    loop._to_planner = MagicMock()
+
+    first = loop.step()
+
+    alerts = store._conn.execute(
+        "SELECT payload_json FROM alerts").fetchall()
+    assert len(alerts) == 1
+    assert json.loads(alerts[0][0])["alert_type"] == "REPEATED_ERROR"
+    assert first["acted"] is False
+    assert loop.state == ProjectState.WORKER_RUNNING
+    loop.auditor.audit.assert_not_called()
+    loop.planner.plan.assert_not_called()
+    loop.executor.nudge_worker.assert_not_called()
+    loop.executor.execute.assert_not_called()
+    loop._run_gate_capture.assert_not_called()
+    loop._to_planner.assert_not_called()
+
+    # The same Worker later completes its file change and becomes idle.  Move
+    # the event timestamp beyond the repeated-error window so this tick is the
+    # existing quiet-completion path, not a second synthetic alert.
+    completed = [ev(
+        "2026-08-27T00:20:00Z", project=task.project_id,
+        worker=task.worker_session_id, etype="file_changed",
+        activity=True, progress=True, message="edited app.py")]
+    loop._collect_events.return_value = completed
+    loop.adapter.get_worker_status.return_value = {
+        "id": task.worker_session_id, "status": "idle",
+        "activity": {"state": "idle"}}
+    completed_run = MagicMock(ok=True)
+    loop._run_gate_capture.return_value = (
+        completed_run, "completed workspace gate: PASS")
+    loop._git_diff = MagicMock(return_value="completed app.py diff")
+    captured = []
+
+    def audit_completed(bundle, audit_id):
+        captured.append(bundle)
+        return AuditResult(
+            audit_id=audit_id, task_id=task.task_id,
+            decision=AuditDecision.PASS, evidence=[], diagnosis="complete",
+            confidence=1.0)
+
+    loop.auditor.audit.side_effect = audit_completed
+    second = loop.step()
+
+    assert second["acted"] is True
+    assert len(captured) == 1
+    assert captured[0].audit_type == "COMPLETION"
+    assert captured[0].test_output == "completed workspace gate: PASS"
+    assert captured[0].git_diff == "completed app.py diff"
+    assert captured[0].failed_criteria == []
+    loop._to_planner.assert_called_once()
+    loop.executor.nudge_worker.assert_not_called()
+
+
 def test_l0_does_not_consume_local_fix_budget(tmp_path):
     loop, task, store = _loop(tmp_path, budgets={
         "max_local_fixes": 2, "max_replans": 1, "max_same_alerts": 5,

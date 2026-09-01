@@ -9,7 +9,9 @@ Providers:
                            structured-output boundary.
 
 Auditor is READ-ONLY: it never edits files, runs shell, or controls the Worker.
-On format failure: one retry; second failure -> decision HUMAN.
+Transport failures propagate to the Controller's bounded step retry.  A
+schema-invalid response is retried once; a second invalid response is a
+provider protocol error, never a semantic HUMAN decision.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .codex_cli import run_codex_json
+from .codex_cli import CodexCliError, run_codex_json
 from .mission_contracts import (AuditResult, AuditEvidence, AuditDecision,
                         validate_audit_result)
 
@@ -134,26 +136,22 @@ class CodexCliAuditorProvider(AuditorProvider):
     def audit(self, bundle: EvidenceBundle, audit_id: str) -> AuditResult:
         last_err = ""
         for attempt in range(2):
-            try:
-                obj = self._call(bundle, audit_id)
-                obj.setdefault("audit_id", audit_id)
-                obj.setdefault("task_id", bundle.task_spec.get("task_id", ""))
-                ok, msg = validate_audit_result(obj)
-                if ok:
-                    return AuditResult.from_dict(obj)
-                last_err = "schema: %s" % msg
-            except Exception as e:  # noqa
-                last_err = "call: %s" % e
+            # CodexCliError (timeout, launch/non-zero, missing output, etc.)
+            # deliberately escapes immediately.  The Controller owns bounded
+            # retry across ticks; retrying here would hide a runtime failure
+            # behind a fabricated domain decision.
+            obj = self._call(bundle, audit_id)
+            obj.setdefault("audit_id", audit_id)
+            obj.setdefault("task_id", bundle.task_spec.get("task_id", ""))
+            ok, msg = validate_audit_result(obj)
+            if ok:
+                return AuditResult.from_dict(obj)
+            last_err = "schema: %s" % msg
             if attempt == 0:
                 time.sleep(0.1)
-        # two failures -> HUMAN
-        return AuditResult(
-            audit_id=audit_id, task_id=bundle.task_spec.get("task_id", ""),
-            decision=AuditDecision.HUMAN,
-            evidence=[AuditEvidence(type="auditor_format_failure",
-                                    summary=last_err or "auditor invalid output")],
-            diagnosis="Auditor failed to produce valid output twice.",
-            confidence=0.0, failed_criteria=list(bundle.failed_criteria))
+        raise CodexCliError(
+            "auditor returned schema-invalid output twice: %s"
+            % (last_err or "unknown validation failure"))
 
 
 # Compatibility for legacy CLI modules outside this migration's edit scope.

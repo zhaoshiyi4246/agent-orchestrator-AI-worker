@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 from loopcore.action_executor import ActionExecutor
 from loopcore.auditor import FakeAuditorProvider
 from loopcore.closed_loop import ClosedLoop
+from loopcore.codex_cli import CodexCliError
 from loopcore.event_observer import Observer
 from loopcore.mission_contracts import (AuditResult, PlannerAction,
                                         ProjectState, TaskSpec)
@@ -119,6 +120,73 @@ def test_audit_pending_reenters_completion_audit(tmp_path, monkeypatch):
     assert len(audits) == 1
 
 
+def test_audit_transport_failure_retries_on_next_tick(tmp_path, monkeypatch):
+    """One provider outage preserves AUDIT_PENDING; the next tick recovers."""
+    loop, store = _parked_loop(tmp_path, monkeypatch,
+                               ProjectState.AUDIT_PENDING)
+
+    class FlakyAuditor:
+        calls = 0
+
+        def audit(self, bundle, audit_id):
+            self.calls += 1
+            if self.calls == 1:
+                raise CodexCliError("auditor timed out")
+            return AuditResult(
+                audit_id=audit_id, task_id=loop.task.task_id,
+                decision="PASS", evidence=[], diagnosis="complete",
+                confidence=1.0)
+
+    flaky = FlakyAuditor()
+    loop.auditor = flaky
+
+    first = loop.step()
+    assert first["acted"] is False
+    assert "CodexCliError: auditor timed out" in first["error"]
+    assert loop.state == ProjectState.AUDIT_PENDING
+    assert flaky.calls == 1
+    assert store._conn.execute("SELECT count(*) FROM audits").fetchone()[0] == 0
+
+    second = loop.step()
+    assert second["acted"] is True
+    assert loop.state == ProjectState.DONE
+    assert flaky.calls == 2
+    assert loop._loop_error_streak == 0
+    assert store._conn.execute("SELECT count(*) FROM audits").fetchone()[0] == 1
+
+
+def test_audit_transport_failure_halts_after_three_ticks(tmp_path, monkeypatch):
+    """A persistent provider outage is bounded by the controller, not HUMAN
+    fabricated by the Auditor provider."""
+    loop, store = _parked_loop(tmp_path, monkeypatch,
+                               ProjectState.AUDIT_PENDING)
+
+    class BrokenAuditor:
+        calls = 0
+
+        def audit(self, bundle, audit_id):
+            self.calls += 1
+            raise CodexCliError("auditor timed out")
+
+    broken = BrokenAuditor()
+    loop.auditor = broken
+
+    first = loop.step()
+    second = loop.step()
+    third = loop.step()
+
+    assert first["acted"] is False
+    assert second["acted"] is False
+    assert third["acted"] is True
+    assert loop.state == ProjectState.HUMAN
+    assert broken.calls == 3
+    assert store._conn.execute("SELECT count(*) FROM audits").fetchone()[0] == 0
+    reason = store._conn.execute(
+        "SELECT reason FROM state_transitions ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0]
+    assert "consecutive loop errors (3): CodexCliError" in reason
+
+
 def test_planner_pending_resumes_planner(tmp_path, monkeypatch):
     """Crash between the PLANNER_PENDING transition and the planner call:
     the audit row survived, no planner action exists yet."""
@@ -134,6 +202,40 @@ def test_planner_pending_resumes_planner(tmp_path, monkeypatch):
     actions = store._conn.execute(
         "SELECT action_id FROM planner_actions").fetchall()
     assert len(actions) == 1
+
+
+def test_verifier_transport_failure_retries_on_next_tick(tmp_path, monkeypatch):
+    """VERIFIER_PENDING survives one provider outage and resumes cleanly."""
+    loop, store = _parked_loop(tmp_path, monkeypatch,
+                               ProjectState.VERIFIER_PENDING)
+
+    class FlakyVerifier:
+        calls = 0
+
+        def verify(self, inp, verify_id):
+            self.calls += 1
+            if self.calls == 1:
+                raise CodexCliError("verifier timed out")
+            return FakeVerifierProvider().verify(inp, verify_id)
+
+    flaky = FlakyVerifier()
+    loop.verifier = flaky
+
+    first = loop.step()
+    assert first["acted"] is False
+    assert "CodexCliError: verifier timed out" in first["error"]
+    assert loop.state == ProjectState.VERIFIER_PENDING
+    assert flaky.calls == 1
+    assert store._conn.execute(
+        "SELECT count(*) FROM verifications").fetchone()[0] == 0
+
+    second = loop.step()
+    assert second["acted"] is True
+    assert loop.state == ProjectState.DONE
+    assert flaky.calls == 2
+    assert loop._loop_error_streak == 0
+    assert store._conn.execute(
+        "SELECT count(*) FROM verifications").fetchone()[0] == 1
 
 
 def test_local_fix_pending_resumes_action_idempotent(tmp_path, monkeypatch):

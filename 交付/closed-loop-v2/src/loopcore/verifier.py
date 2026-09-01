@@ -16,8 +16,9 @@ Providers:
   FakeVerifierProvider     - deterministic, for unit tests.
   CodexCliVerifierProvider - production verifier via the shared Codex CLI
                              structured-output boundary.
-On format failure: one retry; second failure -> verdict FAIL with a format
-note (the loop escalates; a verifier that cannot speak cannot approve).
+Transport failures propagate to the Controller's bounded step retry.  A
+schema-invalid response is retried once; a second invalid response is a
+provider protocol error, never a semantic FAIL verdict.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .codex_cli import run_codex_json
+from .codex_cli import CodexCliError, run_codex_json
 from .mission_contracts import AcCheck, VerifierResult, validate_verifier_result
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
@@ -135,25 +136,23 @@ class CodexCliVerifierProvider(VerifierProvider):
     def verify(self, inp: VerifierInput, verify_id: str) -> VerifierResult:
         last_err = ""
         for attempt in range(2):
-            try:
-                obj = self._call(inp, verify_id)
-                obj.setdefault("verify_id", verify_id)
-                obj.setdefault("task_id", inp.task_spec.get("task_id", ""))
-                self._coerce(obj)
-                ok, msg = validate_verifier_result(obj)
-                if ok:
-                    return VerifierResult.from_dict(obj)
-                last_err = "schema: %s" % msg
-            except Exception as e:  # noqa
-                last_err = "call: %s" % e
+            # Transport/runtime failures escape immediately so the existing
+            # VERIFIER_PENDING step boundary can retry them on the next tick.
+            # Only a complete JSON object that fails local validation gets
+            # this one in-provider protocol retry.
+            obj = self._call(inp, verify_id)
+            obj.setdefault("verify_id", verify_id)
+            obj.setdefault("task_id", inp.task_spec.get("task_id", ""))
+            self._coerce(obj)
+            ok, msg = validate_verifier_result(obj)
+            if ok:
+                return VerifierResult.from_dict(obj)
+            last_err = "schema: %s" % msg
             if attempt == 0:
                 time.sleep(0.1)
-        # A verifier that cannot produce a valid verdict must NOT approve.
-        return VerifierResult(
-            verify_id=verify_id, task_id=inp.task_spec.get("task_id", ""),
-            verdict="FAIL",
-            ac_checks=[], anti_gaming=[],
-            summary="verifier invalid output: %s" % (last_err or "unknown"))
+        raise CodexCliError(
+            "verifier returned schema-invalid output twice: %s"
+            % (last_err or "unknown validation failure"))
 
     @staticmethod
     def _coerce(obj: Dict) -> None:

@@ -329,6 +329,9 @@ def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
     assert runtime._planner.model == "planner-model"
     assert runtime._auditor.model == "auditor-model"
     assert runtime._verifier.model == "verifier-model"
+    assert runtime._planner.timeout == 180
+    assert runtime._auditor.timeout == 180
+    assert runtime._verifier.timeout == 180
     assert runtime.controller.planner is runtime._planner
     assert runtime.controller.auditor is runtime._auditor
     assert runtime.controller.verifier is runtime._verifier
