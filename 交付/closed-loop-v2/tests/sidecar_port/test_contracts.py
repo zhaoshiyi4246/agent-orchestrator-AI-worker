@@ -75,16 +75,16 @@ def test_state_machine_valid_transitions():
                                ProjectState.PLANNER_PENDING)
     assert is_legal_transition(ProjectState.PLANNER_PENDING,
                                ProjectState.LOCAL_FIX_PENDING)
-    # DONE now REQUIRES an independent verifier PASS — the gate routes to
-    # VERIFIER_PENDING, never straight to DONE.
+    # New gate passes finish the task directly.
+    assert is_legal_transition(ProjectState.GATE_PENDING,
+                               ProjectState.DONE)
+    # Historical runtimes already parked in VERIFIER_PENDING remain valid.
     assert is_legal_transition(ProjectState.GATE_PENDING,
                                ProjectState.VERIFIER_PENDING)
     assert is_legal_transition(ProjectState.VERIFIER_PENDING,
                                ProjectState.DONE)
     assert is_legal_transition(ProjectState.VERIFIER_PENDING,
                                ProjectState.AUDIT_PENDING)
-    assert not is_legal_transition(ProjectState.GATE_PENDING,
-                                   ProjectState.DONE)
     assert is_legal_transition(ProjectState.PLANNER_PENDING,
                                ProjectState.HUMAN)
 

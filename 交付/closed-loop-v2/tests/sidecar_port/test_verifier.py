@@ -1,9 +1,8 @@
-"""Verifier flow tests: gate pass -> independent verification -> DONE/loop-back.
+"""Task-gate completion and historical Verifier recovery tests.
 
-Uses fake providers + temp SQLite; no real AO/Claude. The key property under
-test: the deterministic gate alone NEVER produces DONE — an independent
-verifier PASS is required, and a verifier FAIL re-enters the audit->planner
-loop with the verifier findings as evidence.
+Uses fake providers + temp SQLite; no real AO/model call. The key property under
+test: a new deterministic Gate PASS reaches DONE without a task Verifier,
+while historical VERIFIER_PENDING rows retain their old PASS/FAIL behavior.
 """
 from unittest.mock import MagicMock, patch
 
@@ -68,12 +67,15 @@ def _loop(tmp_path, verifier, *, fake_gate_run_ok=True):
     adapter.get_recent_events.return_value = []
     adapter.get_worker_status.return_value = {"id": "w1", "status": "idle"}
     gate = IntegrationGate(store)
-    if fake_gate_run_ok:
-        gate.run = MagicMock(return_value=MagicMock(
-            ok=True, results=[{"command": "pytest", "stdout": "2 passed",
-                               "stderr": ""}],
-            evidence=lambda: [{"type": "integration_gate",
-                               "summary": "pass", "reference": "exit=0"}]))
+    gate.run = MagicMock(return_value=MagicMock(
+        ok=fake_gate_run_ok,
+        results=[{"command": "pytest",
+                  "stdout": "2 passed" if fake_gate_run_ok else "1 failed",
+                  "stderr": ""}],
+        evidence=lambda: [{"type": "integration_gate",
+                           "summary": "pass" if fake_gate_run_ok else "fail",
+                           "reference": "exit=%d" %
+                           (0 if fake_gate_run_ok else 1)}]))
     from loopcore.action_executor import ActionExecutor
     ex = ActionExecutor("ao", "d", "r", store)
     loop = ClosedLoop(task=task, cfg=_cfg(), auditor=FakeAuditorProvider(),
@@ -83,24 +85,60 @@ def _loop(tmp_path, verifier, *, fake_gate_run_ok=True):
     return loop, task, store
 
 
-def test_gate_pass_then_verifier_pass_reaches_done(tmp_path):
-    """Gate pass alone is NOT DONE; verifier PASS is required to finish."""
+def test_gate_pass_reaches_done_without_task_verifier(tmp_path):
     v = _ScriptedVerifier("PASS")
     loop, task, store = _loop(tmp_path, v)
     loop._transition(ProjectState.WORKER_RUNNING, "t", "setup", {})
     loop._transition(ProjectState.GATE_PENDING, "t", "setup", {})
     loop._run_gate()
     assert loop.state == ProjectState.DONE
-    # the verifier saw real gate output
-    assert "2 passed" in v.inputs[0].gate_output
+    assert v.inputs == []
+    assert store._conn.execute(
+        "SELECT count(*) FROM verifications WHERE task_id=?",
+        (task.task_id,)).fetchone()[0] == 0
+    transitions = store._conn.execute(
+        "SELECT to_state FROM state_transitions WHERE task_id=? ORDER BY id",
+        (task.task_id,)).fetchall()
+    assert transitions[-1] == (ProjectState.DONE,)
+    assert (ProjectState.VERIFIER_PENDING,) not in transitions
 
 
-def test_verifier_fail_reenters_audit_planner(tmp_path):
-    """Verifier FAIL -> AUDIT_PENDING -> planner gets verifier evidence."""
+def test_gate_fail_does_not_finish_or_call_task_verifier(tmp_path):
+    v = _ScriptedVerifier("PASS")
+    loop, task, store = _loop(tmp_path, v, fake_gate_run_ok=False)
+    loop._transition(ProjectState.WORKER_RUNNING, "t", "setup", {})
+    loop._transition(ProjectState.GATE_PENDING, "t", "setup", {})
+    audit = AuditResult("A-GATE-FAIL", task.task_id, AuditDecision.HUMAN,
+                        [AuditEvidence("test_failure", "gate failed")],
+                        "gate failed", 1.0, ["AC-01"])
+    loop.auditor.audit = MagicMock(return_value=audit)
+    loop.planner.plan = MagicMock(return_value=PlannerAction(
+        "ACT-GATE-FAIL", task.task_id, PlannerActionType.HUMAN,
+        reason="gate failure requires human"))
+    loop.executor.execute = MagicMock(return_value=MagicMock(
+        ok=True, new_state=ProjectState.HUMAN,
+        new_worker_session_id=None, detail="halted"))
+
+    loop._run_gate()
+
+    assert loop.state == ProjectState.HUMAN
+    assert loop.state != ProjectState.DONE
+    assert v.inputs == []
+    loop.auditor.audit.assert_called_once()
+    assert store._conn.execute(
+        "SELECT count(*) FROM state_transitions "
+        "WHERE task_id=? AND from_state=? AND to_state=? AND actor=?",
+        (task.task_id, ProjectState.GATE_PENDING,
+         ProjectState.AUDIT_PENDING, "integration_gate")).fetchone()[0] == 1
+
+
+def test_historical_verifier_fail_reenters_audit_planner(tmp_path):
+    """Historical VERIFIER_PENDING FAIL keeps its audit/planner semantics."""
     v = _ScriptedVerifier("FAIL")
     loop, task, store = _loop(tmp_path, v)
     loop._transition(ProjectState.WORKER_RUNNING, "t", "setup", {})
     loop._transition(ProjectState.GATE_PENDING, "t", "setup", {})
+    loop._transition(ProjectState.VERIFIER_PENDING, "t", "historical", {})
     loop.auditor = MagicMock(return_value=None)
     audit = AuditResult("A-V1", task.task_id, AuditDecision.LOCAL_FIX,
                         [AuditEvidence("verifier_fail", "AC-01 FAIL")],
@@ -114,7 +152,7 @@ def test_verifier_fail_reenters_audit_planner(tmp_path):
     loop.executor.execute = MagicMock(return_value=MagicMock(
         ok=True, new_state=ProjectState.WORKER_RETRYING,
         new_worker_session_id=None, detail="sent"))
-    loop._run_gate()
+    loop._run_verifier()
     assert loop.state != ProjectState.DONE
     # planner was consulted after the verifier-driven audit
     loop.planner.plan.assert_called_once()

@@ -64,10 +64,9 @@ class ClosedLoop:
         self.gate = gate
         self.store = store
         self.dry_run = dry_run
-        # Independent correctness verifier (read-only model role). When None
-        # (legacy single-task runs), a default fake-free provider is created
-        # lazily so DONE still requires an independent PASS — the deterministic
-        # gate alone never declares a task finished.
+        # Retained for historical VERIFIER_PENDING recovery. New task gates
+        # finish on deterministic PASS without invoking this provider; Mission
+        # final verification is owned separately by MissionController.
         self.verifier = verifier
         # Top-level user directive the Planner absorbs and folds into its
         # strategy every cycle (the "leader" role lives in the Planner).
@@ -174,12 +173,10 @@ class ClosedLoop:
             self._halt_budget("max_runtime_seconds exceeded")
             result["state"] = self.state
             return result
-        # Crash-resume: a process killed between the gate-pass transition and
-        # the verifier call parks the loop in VERIFIER_PENDING forever (the
-        # verifier ran inside _run_gate's synchronous step, and no branch
-        # below re-enters it). If we ARE in VERIFIER_PENDING, the verifier
-        # call by definition did not complete (a PASS would have moved to
-        # DONE, a FAIL back to AUDIT_PENDING) — so re-enter it.
+        # Historical crash-resume: runtimes created before task verification
+        # became final-only may already be persisted in VERIFIER_PENDING. Keep
+        # executing that old task verifier path until it reaches DONE,
+        # AUDIT_PENDING, or HUMAN; new gate passes never enter this state.
         if self.state == ProjectState.VERIFIER_PENDING:
             result["acted"] = True
             self._run_verifier()
@@ -187,8 +184,8 @@ class ClosedLoop:
             return result
         # Crash-resume for the remaining transient "pending" states, same
         # pattern as VERIFIER_PENDING above: the synchronous chain
-        # audit -> planner -> execute -> gate -> verifier can be killed at
-        # ANY hop (tool timeout, Ctrl-C, power loss); without a re-entry
+        # audit -> planner -> execute -> gate can be killed at ANY hop (tool
+        # timeout, Ctrl-C, power loss); without a re-entry
         # branch the loop then parks forever because nothing below picks it
         # up (real-run evidence: MISSION-QUICK-006 S2 parked in
         # PLANNER_PENDING after a mid-planner kill, 4+ min no progress).
@@ -1074,7 +1071,7 @@ class ClosedLoop:
             # the gate — violating the dry-run contract.)
             return
         run = self.gate.run(self.task, worktree)
-        target = ProjectState.VERIFIER_PENDING if run.ok \
+        target = ProjectState.DONE if run.ok \
             else ProjectState.AUDIT_PENDING
         if is_legal_transition(self.state, target):
             self._transition(target, "integration_gate",
@@ -1095,9 +1092,6 @@ class ClosedLoop:
                         message="integration gate pass", source="gate"))
             except Exception:
                 pass
-            # gate commands passed — but the deterministic gate alone never
-            # declares DONE: route through the independent Verifier.
-            self._run_verifier(run)
         else:
             # re-enter audit with gate evidence (bounded by budgets)
             audit_id = make_id("AUDIT-GATE")
@@ -1121,13 +1115,12 @@ class ClosedLoop:
 
     # ----------------------------------------------------------- verifier
     def _run_verifier(self, run=None) -> None:
-        """Independent verification: gate passed -> is the result CORRECT?
+        """Resume the historical task-level independent verification path.
 
-        Assembles trusted inputs (diff vs frozen base, REAL gate output,
-        changed paths, deterministic path-gate findings) and asks the
-        read-only Verifier. PASS -> DONE; FAIL -> back to AUDIT_PENDING with
-        the verifier findings as evidence (the Planner then decides how to
-        fix — bounded by budgets).
+        Runtimes persisted in VERIFIER_PENDING before verifier convergence
+        still assemble trusted inputs and invoke the read-only Verifier.
+        PASS -> DONE; FAIL -> AUDIT_PENDING. New Gate PASS transitions bypass
+        this method and go directly to DONE.
         """
         from .mission_contracts import VerifierResult
         worktree = self._worktree_path()

@@ -98,9 +98,9 @@ class ProjectState:
 
 
 # Legal state transitions (no arbitrary jumps).
-# VERIFIER_PENDING: gate passed commands but the independent Verifier has not
-# confirmed the result yet. DONE now REQUIRES verifier PASS — the deterministic
-# gate alone never declares a task finished.
+# New task gates transition directly from GATE_PENDING to DONE on PASS.
+# VERIFIER_PENDING and its transitions remain legal so runtimes persisted by
+# earlier versions can resume their in-flight task verifier safely.
 LEGAL_TRANSITIONS: Dict[str, set] = {
     ProjectState.TASK_READY: {ProjectState.WORKER_RUNNING, ProjectState.HUMAN,
                               ProjectState.FAILED},
@@ -117,7 +117,8 @@ LEGAL_TRANSITIONS: Dict[str, set] = {
                                    ProjectState.HUMAN},
     ProjectState.REPLAN_PENDING: {ProjectState.WORKER_RUNNING, ProjectState.HUMAN,
                                   ProjectState.FAILED},
-    ProjectState.GATE_PENDING: {ProjectState.VERIFIER_PENDING,
+    ProjectState.GATE_PENDING: {ProjectState.DONE,
+                                ProjectState.VERIFIER_PENDING,
                                 ProjectState.AUDIT_PENDING,
                                 ProjectState.HUMAN, ProjectState.FAILED},
     ProjectState.VERIFIER_PENDING: {ProjectState.DONE, ProjectState.AUDIT_PENDING,

@@ -10,7 +10,7 @@ there is deliberately NO coordinator agent):
        |
     N x ClosedLoop (one per subtask, each with its own ao-spawned worker,
                     per-worker frozen base, budgets, audit->planner loop,
-                    gate -> independent Verifier -> DONE)
+                    deterministic gate -> DONE)
        |
     integration merge (trusted code: commit + fetch + merge per subtask)
        |
@@ -453,7 +453,7 @@ class MissionController:
                 # freeze the per-worker diff base AT DISPATCH — before the
                 # worker can commit. Freezing lazily (first gate/audit) loses
                 # the race against workers that `git commit` mid-task, and
-                # the verifier would then see an empty diff (real-run bug:
+                # task evidence would then see an empty diff (real-run bug:
                 # S1 implemented+committed divide yet verified as "no
                 # source changes").
                 worktree = self._worker_workspace(new_sid)
