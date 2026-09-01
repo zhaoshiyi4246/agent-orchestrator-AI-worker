@@ -50,14 +50,39 @@ Worker 指令：MissionController → ActionExecutor → AO
 |---|---|---|---|
 | Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 自动拆解、接收证据并裁决；不直接编辑代码 |
 | Auditor | 1 个只读 headless Codex CLI Provider | `gpt-5.6-sol` | 语义审计，只向 Planner 提交结果，不直接控制 Worker |
-| Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 当前在子任务 Gate 后和 Mission 终局复核，只输出验证结果 |
+| Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 新 Mission 正常路径只在 Mission 终局调用；历史 `VERIFIER_PENDING` Task 恢复仍可调用 |
 | Worker | AO Chat-mode Codex Worker，harness=`codex` | `gpt-5.6-sol` | 在 AO worktree 中执行边界明确的编码任务 |
 | Observer | 确定性程序 | no model | 从 AO 事实产生触发和证据 |
 | Integration Gate | 确定性程序 | no model | 运行显式 argv 门禁并记录稳定证据 |
 
 当前系统允许一个 Mission 拆出多个子任务；“默认 1 个 Worker、确有独立并行收益
-时最多 2 个”是 R3 的收敛目标，不是当前实现不变量。Verifier 当前仍用于每个
-子任务 Gate 后和 Mission 终局；“只在终局/高风险调用”同样是 R3 目标。
+时最多 2 个”仍是后续收敛目标，不是当前实现不变量。
+
+当前真实 Task happy path 仍保留 Completion Auditor + Planner：
+
+```text
+Worker
+→ Completion Auditor
+→ Planner
+→ deterministic Task Gate
+→ DONE
+```
+
+新 Task 的 Gate PASS 不调用 Task Verifier，也不写 task-level verification row。
+历史 runtime 若已经处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
+
+当前 Mission final path 是：
+
+```text
+materialization
+→ integration
+→ Final Gate
+→ Mission Verifier
+→ MISSION_DONE / HUMAN
+```
+
+Mission Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。VerifierProvider
+仍是正式角色；高风险子任务的显式按需策略尚未实现。
 
 ## 当前已经实现
 
@@ -66,7 +91,7 @@ Worker 指令：MissionController → ActionExecutor → AO
 - AO Codex Worker 执行，Panel 与 CLI 均使用 `codex` harness；
 - Observer 确定性观察；
 - Auditor 向 Planner 提交审计结果并形成闭环；
-- Integration Gate 和当前 Verifier；
+- deterministic Task Gate、Mission Final Gate 和 Mission Verifier；
 - StateStore 持久化及恢复；
 - stop/resume；
 - Store 后置事件投影和 UI 时间线。
@@ -88,11 +113,10 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 
 ## 后续顺序
 
-1. 合并 PR #6 的 AO 运行时可移植性修复；
-2. 运行一次完整真实 E2E Mission；
-3. Competition behavior convergence：默认 1 个 Worker、确有必要时最多 2 个，
-   Verifier 默认只在 final/终局调用，并把 `auto_ff_master` 隐藏或明确标记为
-   实验性高风险功能；
+1. Verifier final-only 已完成；合并当前 PR 后运行一次同题真实性能 E2E；
+2. 下一项进行 Completion Auditor / Planner happy-path convergence；
+3. 默认 1 个 Worker、确有必要时最多 2 个，以及隐藏或明确标记
+   `auto_ff_master` 为实验性高风险功能，仍待后续；
 4. 再生成主路径引用图并清理重复模块和旧入口；
 5. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
 
