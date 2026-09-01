@@ -2,7 +2,8 @@
 
 Verified interface surface (see docs/AO_INTEGRATION_AUDIT.md):
   - REST:   GET /api/v1/projects | /projects/{id} | /sessions | /sessions/{id}
-            | /sessions/{id}/conversation | /agents | /notifications
+            | /sessions/{id}/conversation
+            | /desktop/sessions/{id}/workspace | /agents | /notifications
   - SSE:    GET /api/v1/events  (replay-all; resume via Last-Event-ID)
   - No auth on any endpoint; daemon binds 127.0.0.1:3001.
 
@@ -181,6 +182,17 @@ class AOAdapter:
         """Full session record of one worker."""
         data = self._get("/api/v1/sessions/%s" % worker_id)
         return (data or {}).get("session", data or {})
+
+    def get_session_workspace(self, session_id: str) -> str:
+        """Return AO's authoritative live workspace path for one session."""
+        data = self._get(
+            "/api/v1/desktop/sessions/%s/workspace" % session_id)
+        workspace = data.get("workspacePath") if isinstance(data, dict) else None
+        if not isinstance(workspace, str) or not workspace.strip():
+            raise AOError(
+                "AO workspace response for %s has no workspacePath"
+                % session_id)
+        return workspace.strip()
 
     def get_worker_conversation(self, worker_id: str) -> Dict:
         """Conversation with turns, messages and the activities[] stream."""

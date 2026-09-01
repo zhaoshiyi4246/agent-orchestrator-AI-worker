@@ -25,7 +25,6 @@ in parallel server-side (AO); the controller is single-threaded.
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from pathlib import Path
@@ -33,7 +32,7 @@ from typing import Dict, List, Optional
 
 from . import worktree as wt
 from .action_executor import ActionExecutor
-from .ao_adapter import AOAdapter
+from .ao_adapter import AOAdapter, AOError
 from .auditor import AuditorProvider
 from .closed_loop import ClosedLoop
 from .mission_contracts import (MissionPlan, MissionSpec, ProjectState, TaskSpec)
@@ -457,11 +456,19 @@ class MissionController:
                 # the verifier would then see an empty diff (real-run bug:
                 # S1 implemented+committed divide yet verified as "no
                 # source changes").
-                worktree = (Path(os.environ.get("AO_DATA_DIR", ""))
-                            / "worktrees" / self.mission.project_id / new_sid)
-                if worktree.exists():
-                    wt.freeze_base(str(worktree), self.store,
-                                   task.task_id, scope=new_sid)
+                worktree = self._worker_workspace(new_sid)
+                if not worktree or not Path(worktree).is_dir():
+                    self._set_state(
+                        "HUMAN",
+                        "AO workspace unavailable after spawning %s" % new_sid)
+                    return
+                base = wt.freeze_base(worktree, self.store,
+                                      task.task_id, scope=new_sid)
+                if not base:
+                    self._set_state(
+                        "HUMAN",
+                        "unable to freeze audit base for Worker %s" % new_sid)
+                    return
 
     # ------------------------------------------------------------ events
     def _apply_directives(self) -> None:
@@ -545,26 +552,33 @@ class MissionController:
         return evs
 
     # ------------------------------------------------------------- merge
-    def _integration_wt(self) -> Optional[str]:
-        data_dir = os.environ.get("AO_DATA_DIR", "")
-        if not data_dir:
+    def _worker_workspace(self, session_id: str) -> Optional[str]:
+        """Resolve one live AO Session workspace, failing closed."""
+        try:
+            return self.adapter.get_session_workspace(session_id)
+        except AOError:
             return None
-        base = Path(data_dir) / "worktrees" / self.mission.project_id
-        # any existing worktree of the project gives us the git dir; use the
-        # first task's worker worktree (workers get worktrees at spawn), else
-        # the project path itself if it is a repo
-        src = None
-        for task in self.tasks.values():
-            if task.worker_session_id:
-                cand = base / task.worker_session_id
-                if cand.exists():
-                    src = str(cand)
+
+    def _integration_wt(
+            self, source_worktree: Optional[str] = None) -> Optional[str]:
+        integ = Path(self.store.path).parent / "integration"
+        if integ.exists():
+            return str(integ) if wt._current_head(str(integ)) else None
+
+        # A caller that already resolved a live Worker workspace supplies it.
+        # Recovery may instead find the first still-live task through the same
+        # AO endpoint; neither path infers AO's filesystem layout.
+        src = source_worktree
+        if not src:
+            for task in self.tasks.values():
+                if not task.worker_session_id:
+                    continue
+                candidate = self._worker_workspace(task.worker_session_id)
+                if candidate and Path(candidate).is_dir():
+                    src = candidate
                     break
-        if src is None:
-            src = str(Path(self.mission.project_id))
-            if not (Path(src) / ".git").exists():
-                return None
-        integ = base / ("integration-" + self.mission.mission_id)
+        if not src or not Path(src).is_dir():
+            return None
         out = wt.add_integration_worktree(src, "integration-%s"
                                           % self.mission.mission_id,
                                           str(integ))
@@ -647,11 +661,11 @@ class MissionController:
                 continue
             if not task.worker_session_id:
                 continue
-            worktree = (Path(os.environ.get("AO_DATA_DIR", ""))
-                        / "worktrees" / self.mission.project_id /
-                        task.worker_session_id)
-            if not worktree.exists():
-                continue
+            worktree = self._worker_workspace(task.worker_session_id)
+            if not worktree or not Path(worktree).is_dir():
+                self._set_state(
+                    "HUMAN", "AO workspace unavailable for %s" % sid)
+                return
             # Stop the worker BEFORE committing its worktree: if the AO session
             # is still alive it may write to the worktree mid-merge (cleanup,
             # cache, hooks), and commit_all would capture a half-baked state
@@ -660,13 +674,18 @@ class MissionController:
                 self.executor.kill_worker(task.worker_session_id)
             except Exception:
                 pass  # best-effort; a dead worker is fine, merge must proceed
-            sha = wt.commit_all(str(worktree), "subtask %s" % sid)
-            integ = self._integration_wt()
-            if not integ or not sha:
+            sha = wt.commit_all(worktree, "subtask %s" % sid)
+            if not sha:
+                self._set_state("HUMAN",
+                                "unable to commit Worker workspace for %s"
+                                % sid)
+                return
+            integ = self._integration_wt(source_worktree=worktree)
+            if not integ:
                 self._set_state("HUMAN",
                                 "integration worktree unavailable for %s" % sid)
                 return
-            r = wt.merge_worktree(integ, str(worktree))
+            r = wt.merge_worktree(integ, worktree)
             if r.status == wt.MergeOutcome.OK:
                 self.merged.append(sid)
                 # Persist merged so a crash-resume can re-fire final verify

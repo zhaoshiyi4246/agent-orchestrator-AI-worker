@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 已完成；R2-0 已解除 AO 主运行路径可移植性 blocker；下一步先做完整真实 E2E Mission smoke，再优先收敛比赛行为
+- 状态：R1 已完成；R2-0 已将 AO executable、runfile 与 Worker workspace 收敛到可移植/官方运行时契约；待本 PR 审计合并后进入 demo bootstrap + GUI E2E
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -129,10 +129,16 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   均使用 `codex`；Panel 不硬编码 Worker model，`config/default.yaml` 的
   `worker.model=gpt-5.6-sol` 由 `run_mission.py` 注入 `ActionExecutor`。
 - `AOAdapter` 通过 AO REST 读取 Project/Session/Conversation/activity，并可
-  调用 approval resolve；有效 runfile 中的动态端口优先于 `ao.base_url`，后者
-  再回退到 `http://127.0.0.1:3001`，`ao.request_timeout_seconds` 已接入请求
-  timeout。`ActionExecutor` 承担 AO CLI 写操作，使用调用方传入的 executable
-  和可选 runfile，不再无条件注入 `AO_DATA_DIR`。
+  调用 approval resolve；Worker workspace 的权威来源是 AO Desktop loopback
+  `GET /api/v1/desktop/sessions/{sessionId}/workspace`，CL-AO 不复制 AO 的
+  Git/Scratch workspace layout，也不再通过 `AO_DATA_DIR` 推导 Worker 路径。
+  有效 runfile 中的动态端口优先于 `ao.base_url`，后者再回退到
+  `http://127.0.0.1:3001`，`ao.request_timeout_seconds` 已接入请求 timeout。
+  `ActionExecutor` 承担 AO CLI 写操作，使用调用方传入的 executable 和可选
+  runfile，不再无条件注入 `AO_DATA_DIR`。
+- Mission integration worktree 不是 AO Session workspace，由 CL-AO 管理在
+  `runtime/<mission-id>/integration`（即 StateStore 同目录的 `integration`）。
+  最终 Gate/Verifier 直接复用该路径，不依赖已终止 Worker 的 AO workspace。
 - `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
   只创建生产 Codex Planner，输出结构化 MissionPlan 并直接退出。该路径不
   创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、
@@ -214,19 +220,27 @@ AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
 - runfile：`CLAO_AO_RUN_FILE` → `Path.home() / ".ao" / "running.json"`；
 - endpoint：有效 runfile port → 显式 `ao.base_url` →
   `http://127.0.0.1:3001`；
+- Worker workspace：AO Desktop loopback
+  `/api/v1/desktop/sessions/{sessionId}/workspace` 返回的现存绝对路径；正常
+  Mission 对 endpoint 缺失或错误 fail closed，不回退到 AO data root；
 - `ActionExecutor` 只在传入明确 runfile 时向 AO CLI 设置 `AO_RUN_FILE`，正常
   生产组装不传入或注入开发者专属 `AO_DATA_DIR`；
+- integration worktree：CL-AO runtime 下的 `runtime/<mission-id>/integration`，
+  不属于 AO managed worktree root；
 - 默认关闭的 `auto_ff_master` 仍属 R4 高风险边界；只有显式设置
   `CLAO_AO_DATA_DIR` 才允许其解析 legacy integration worktree，否则明确拒绝；
 - `llm_env.py`、旧 AO Client/CLI 和依赖 `AO_DATA_DIR` 的测试夹具仍是 R2/R4
   待审计兼容或历史边界，本轮未删除或改写。
 
-本轮 live probe 从默认 runfile 解析到 daemon endpoint，`get_projects()` 与
-`ao status --json` 均成功，且未创建 Worker。完整真实 Mission 尚未运行；下一步
-先完成该 E2E smoke，通过后优先进入 Competition behavior convergence，而不是
-立即开始 R2-1 重复模块清理。
+PR #6 的 live probe 曾从默认 runfile 解析到 daemon endpoint，`get_projects()`
+与 `ao status --json` 均成功，且未创建 Worker。本 workspace API 任务的离线
+回归已验证 endpoint URL、错误边界、dispatch、merge 和 final verify；本次 live
+transport probe 时 AO Desktop/daemon 未运行（默认 runfile 不存在且 loopback
+未监听），因此未读取 Session 内容、未启动 AO、未创建 Worker。完整真实 Mission
+仍未运行。
 
-K18 当前只关闭“主生产运行路径含开发者绝对 AO 路径”这一 blocker。它解决的是
+K18 的主生产路径已经移除 AO executable、runfile 的开发机绝对路径依赖，并以
+官方 Session workspace endpoint 取代 `AO_DATA_DIR` 内部目录推导。它解决的是
 运行时路径可移植性，不是任意用户零配置安装，也不代表当前仓库是通用安装包。
 用户交付可移植性仍包括：
 
@@ -495,9 +509,10 @@ UI → 绕过 MissionController 改状态
 - R4：收敛配置、项目选择和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。
 
-当前执行优先级为：PR #6 → 单次完整真实 E2E → Competition behavior
-convergence → 重复模块清理 → clean delivery/installer/first-run。该顺序优先于
-按阶段编号机械推进；E2E 通过后不立即开始 R2-1。
+当前执行优先级为：本 workspace API PR → demo bootstrap + GUI E2E →
+Competition behavior convergence → 重复模块清理 → clean
+delivery/installer/first-run。该顺序优先于按阶段编号机械推进；E2E 通过后不
+立即开始 R2-1。
 
 ## 十、明确非目标
 

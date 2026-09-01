@@ -104,8 +104,8 @@ def test_head_mutation_reaches_verifier_findings(tmp_path, monkeypatch):
     task.gate_commands = ['git commit --allow-empty -qm mutation']
     wt = tmp_path / "worktrees" / task.project_id / task.worker_session_id
     _repo(wt)
-    monkeypatch.setenv("AO_DATA_DIR", str(tmp_path))
     adapter = MagicMock()
+    adapter.get_session_workspace.return_value = str(wt)
     adapter.get_worker_status.return_value = {"id": task.worker_session_id,
                                               "status": "idle"}
     verifier = _RecordingVerifier()

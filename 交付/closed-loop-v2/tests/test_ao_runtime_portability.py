@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import run_mission
 from loopcore.action_executor import ActionExecutor
-from loopcore.ao_adapter import AOAdapter
+from loopcore.ao_adapter import AOAdapter, AOError
+from loopcore.closed_loop import ClosedLoop
 from loopcore.state_store import StateStore
 
 
@@ -80,6 +82,77 @@ def test_adapter_honors_ao_run_file_and_home_default(tmp_path, monkeypatch):
     default.write_text('{"port": 4569}', encoding="utf-8")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     assert AOAdapter().base_url == "http://127.0.0.1:4569"
+
+
+def test_adapter_get_session_workspace_uses_desktop_endpoint(
+        tmp_path, monkeypatch):
+    adapter = AOAdapter(run_file=tmp_path / "missing")
+    calls = []
+
+    def fake_get(path):
+        calls.append(path)
+        return {"sessionId": "project-7", "workspacePath": "C:/ao/wt"}
+
+    monkeypatch.setattr(adapter, "_get", fake_get)
+    assert adapter.get_session_workspace("project-7") == "C:/ao/wt"
+    assert calls == ["/api/v1/desktop/sessions/project-7/workspace"]
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"workspacePath": None}, {"workspacePath": ""},
+    {"workspacePath": "   "},
+])
+def test_adapter_get_session_workspace_rejects_empty_path(
+        tmp_path, monkeypatch, payload):
+    adapter = AOAdapter(run_file=tmp_path / "missing")
+    monkeypatch.setattr(adapter, "_get", lambda _path: payload)
+    with pytest.raises(AOError, match="workspacePath"):
+        adapter.get_session_workspace("project-8")
+
+
+def test_adapter_get_session_workspace_preserves_http_error(
+        tmp_path, monkeypatch):
+    adapter = AOAdapter(run_file=tmp_path / "missing")
+
+    def missing(_path):
+        raise AOError("HTTP 404 SESSION_WORKSPACE_NOT_FOUND")
+
+    monkeypatch.setattr(adapter, "_get", missing)
+    with pytest.raises(AOError, match="SESSION_WORKSPACE_NOT_FOUND"):
+        adapter.get_session_workspace("project-9")
+
+
+def test_closed_loop_worktree_path_uses_adapter_not_data_dir(
+        tmp_path, monkeypatch):
+    class Adapter:
+        def __init__(self):
+            self.calls = []
+
+        def get_session_workspace(self, session_id):
+            self.calls.append(session_id)
+            return "C:/authoritative/workspace"
+
+    loop = object.__new__(ClosedLoop)
+    loop.task = SimpleNamespace(worker_session_id="project-10")
+    loop.adapter = Adapter()
+    monkeypatch.setenv("AO_DATA_DIR", str(tmp_path / "poison"))
+
+    assert loop._worktree_path() == "C:/authoritative/workspace"
+    assert loop.adapter.calls == ["project-10"]
+
+
+def test_closed_loop_worktree_path_fails_closed_on_ao_error():
+    class Adapter:
+        def get_session_workspace(self, _session_id):
+            raise AOError("SESSION_WORKSPACE_NOT_FOUND")
+
+    loop = object.__new__(ClosedLoop)
+    loop.task = SimpleNamespace(worker_session_id="project-11")
+    loop.adapter = Adapter()
+    assert loop._worktree_path() is None
+
+    loop.task.worker_session_id = None
+    assert loop._worktree_path() is None
 
 
 def test_action_executor_only_adds_explicit_runfile(monkeypatch, tmp_path):

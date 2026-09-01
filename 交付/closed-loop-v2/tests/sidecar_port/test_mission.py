@@ -80,8 +80,10 @@ def test_dispatch_respects_dependencies(tmp_path):
         sid = "sess-" + task.task_id[-2:]
         spawned[task.task_id] = sid
         return sid
+    mc.adapter.get_session_workspace.return_value = str(tmp_path)
     with patch.object(mc.executor, "spawn_initial_worker",
-                      side_effect=fake_spawn):
+                      side_effect=fake_spawn), \
+            patch("loopcore.mission.wt.freeze_base", return_value="BASE") as freeze:
         mc.step()      # dispatch
     s1 = [s for s in mc.plan.subtasks if not s.dependencies][0].subtask_id
     s2 = [s for s in mc.plan.subtasks if s.dependencies][0].subtask_id
@@ -92,16 +94,129 @@ def test_dispatch_respects_dependencies(tmp_path):
                             to_state="DONE", actor="t", reason="t",
                             evidence={})
     with patch.object(mc.executor, "spawn_initial_worker",
-                      side_effect=fake_spawn):
+                      side_effect=fake_spawn), \
+            patch("loopcore.mission.wt.freeze_base", return_value="BASE"):
         mc.step()
     assert s2 in spawned
+    assert freeze.call_args.args[0] == str(tmp_path)
+    assert mc.adapter.get_session_workspace.call_args_list[0].args == (
+        spawned[s1],)
+
+
+def test_dispatch_workspace_failure_halts_mission(tmp_path):
+    from loopcore.ao_adapter import AOError
+
+    mc, store = _mc(tmp_path)
+    mc.step()
+    mc.adapter.get_session_workspace.side_effect = AOError(
+        "SESSION_WORKSPACE_NOT_FOUND")
+
+    with patch.object(mc.executor, "spawn_initial_worker",
+                      return_value="sess-missing"), \
+            patch.object(mc.executor, "kill_worker") as kill, \
+            patch("loopcore.mission.wt.freeze_base") as freeze:
+        result = mc.step()
+
+    assert result["state"] == "HUMAN"
+    assert any(t.worker_session_id == "sess-missing"
+               for t in mc.tasks.values())
+    mc.adapter.get_session_workspace.assert_called_once_with("sess-missing")
+    freeze.assert_not_called()
+    kill.assert_called_once_with("sess-missing")
+
+
+def _bind_done_worker(mc, store, session_id="sess-done"):
+    sid = next(iter(mc.tasks))
+    task = mc.tasks[sid]
+    task.worker_session_id = session_id
+    store.record_task(task.task_id, task.to_dict())
+    store.record_transition(task_id=sid, from_state="TASK_READY",
+                            to_state="WORKER_RUNNING", actor="t", reason="t",
+                            evidence={})
+    store.record_transition(task_id=sid, from_state="WORKER_RUNNING",
+                            to_state="DONE", actor="t", reason="t",
+                            evidence={})
+    return sid, task
+
+
+def test_merge_resolves_workspace_before_kill_and_uses_actual_path(tmp_path):
+    mc, store = _mc(tmp_path)
+    mc.step()
+    sid, task = _bind_done_worker(mc, store)
+    worker = tmp_path / "actual-worker"
+    worker.mkdir()
+    integration = tmp_path / "integration"
+    order = []
+
+    def workspace(session_id):
+        order.append(("workspace", session_id))
+        return str(worker)
+
+    def kill(session_id):
+        order.append(("kill", session_id))
+
+    def commit(path, _message):
+        order.append(("commit", path))
+        return "abc123"
+
+    def integration_wt(*, source_worktree=None):
+        order.append(("integration", source_worktree))
+        return str(integration)
+
+    def merge(target, source):
+        order.append(("merge", target, source))
+        return MagicMock(status="ok")
+
+    mc.adapter.get_session_workspace.side_effect = workspace
+    mc.executor.kill_worker = kill
+    with patch("loopcore.mission.wt.commit_all", side_effect=commit), \
+            patch.object(mc, "_integration_wt",
+                         side_effect=integration_wt), \
+            patch("loopcore.mission.wt.merge_worktree", side_effect=merge):
+        mc._merge_done()
+
+    assert order == [
+        ("workspace", task.worker_session_id),
+        ("kill", task.worker_session_id),
+        ("commit", str(worker)),
+        ("integration", str(worker)),
+        ("merge", str(integration), str(worker)),
+    ]
+    assert sid in mc.merged
+
+
+def test_merge_workspace_failure_halts_before_commit(tmp_path):
+    from loopcore.ao_adapter import AOError
+
+    mc, store = _mc(tmp_path)
+    mc.step()
+    _sid, task = _bind_done_worker(mc, store, "sess-gone")
+    order = []
+
+    def missing(session_id):
+        order.append(("workspace", session_id))
+        raise AOError("SESSION_WORKSPACE_NOT_FOUND")
+
+    def kill(session_id):
+        order.append(("kill", session_id))
+
+    mc.adapter.get_session_workspace.side_effect = missing
+    mc.executor.kill_worker = kill
+    with patch("loopcore.mission.wt.commit_all") as commit:
+        mc._merge_done()
+
+    assert mc.state == "HUMAN"
+    assert order == [
+        ("workspace", task.worker_session_id),
+        ("kill", task.worker_session_id),
+    ]
+    commit.assert_not_called()
 
 
 def test_full_mission_to_done_with_merge(tmp_path):
     """End-to-end fake run: 2 subtasks DONE -> merge -> final verify PASS."""
     import subprocess
-    import os
-    # real mini git repo simulating the AO worktree layout
+    # real mini git repo with two AO Session workspaces
     data_dir = tmp_path / "ao-data"
     proj = data_dir / "worktrees" / "closed-loop-demo"
     proj.mkdir(parents=True)
@@ -123,9 +238,9 @@ def test_full_mission_to_done_with_merge(tmp_path):
         "    if b==0: raise ValueError\n    return a/b\n", encoding="utf-8")
     (wts["sess-S2"] / "math2.py").write_text(
         "def multiply(a,b): return a*b\n", encoding="utf-8")
-    os.environ["AO_DATA_DIR"] = str(data_dir)
-
     mc, store = _mc(tmp_path)
+    mc.adapter.get_session_workspace.side_effect = (
+        lambda session_id: str(wts[session_id]))
     mc.step()        # decompose
     spawned = {}
     def fake_spawn(task):
@@ -148,16 +263,24 @@ def test_full_mission_to_done_with_merge(tmp_path):
     store.record_transition(task_id=s2, from_state="WORKER_RUNNING",
                             to_state="DONE", actor="t", reason="t",
                             evidence={})
-    # final step: merge S2 + final gate + mission verifier
+    # Merge S2 while its AO Session workspace remains available.
+    mc._merge_done()
+    assert s2 in mc.merged
+    # Final verification must reuse the CL-AO integration worktree without
+    # consulting either terminated Worker Session.
+    from loopcore.ao_adapter import AOError
+    mc.adapter.get_session_workspace.reset_mock()
+    mc.adapter.get_session_workspace.side_effect = AOError(
+        "SESSION_WORKSPACE_NOT_FOUND")
     gate_ok = MagicMock(ok=True, results=[
         {"command": "pytest", "stdout": "4 passed", "stderr": ""}])
     with patch.object(IntegrationGate, "run", return_value=gate_ok):
         r = mc.step()
-    assert s2 in mc.merged
     assert r["state"] == "MISSION_DONE"
+    mc.adapter.get_session_workspace.assert_not_called()
     # merged tree contains both subtask outputs
-    integ = data_dir / "worktrees" / "closed-loop-demo" / \
-        ("integration-" + mc.mission.mission_id)
+    integ = Path(store.path).parent / "integration"
+    assert data_dir not in integ.parents
     assert "divide" in (integ / "app.py").read_text(encoding="utf-8")
     assert (integ / "math2.py").exists()
 

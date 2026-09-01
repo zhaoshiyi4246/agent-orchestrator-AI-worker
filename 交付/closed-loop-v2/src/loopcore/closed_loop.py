@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .action_executor import ActionExecutor, ActionResult
-from .ao_adapter import AOAdapter
+from .ao_adapter import AOAdapter, AOError
 from .approvals import decide_approval
 from .auditor import (AuditorProvider, ClaudeCliAuditorProvider,
                       EvidenceBundle, FakeAuditorProvider)
@@ -1318,19 +1318,14 @@ class ClosedLoop:
         self._to_planner(audit)
 
     def _worktree_path(self) -> Optional[str]:
-        # AO lays out worker worktrees at <AO_DATA_DIR>/worktrees/<project>/<session>
-        # (verified on disk). Fall back to the older data/worktrees layout.
-        import os
-        data_dir = os.environ.get("AO_DATA_DIR", "")
-        if not data_dir:
+        """Resolve the bound Worker's live workspace through AO."""
+        session_id = self.task.worker_session_id
+        if not session_id:
             return None
-        cand = Path(data_dir) / "worktrees" / self.task.project_id / \
-            (self.task.worker_session_id or "")
-        if cand.exists():
-            return str(cand)
-        old = Path(data_dir) / "data" / "worktrees" / self.task.project_id / \
-            (self.task.worker_session_id or "")
-        return str(old) if old.exists() else str(cand)
+        try:
+            return self.adapter.get_session_workspace(session_id)
+        except AOError:
+            return None
 
     def _path_violations(self):
         """(forbidden_violations, allowed_violations) via worktree.py.

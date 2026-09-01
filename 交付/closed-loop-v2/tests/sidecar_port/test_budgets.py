@@ -319,7 +319,7 @@ def test_auto_approve_inside_allowed_paths_only(tmp_path, monkeypatch):
     wt = tmp_path / "worktrees" / task.project_id / task.worker_session_id
     wt.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(wt), check=True)
-    monkeypatch.setenv("AO_DATA_DIR", str(tmp_path))
+    loop.adapter.get_session_workspace.return_value = str(wt)
     def _act(aid, fpath):
         return {"id": aid, "activityKind": "approval", "status": "pending",
                 "providerItemId": aid, "summary": "Edit x",
