@@ -34,14 +34,34 @@ Panel / run_mission
 |---|---|
 | Planner | 项目级唯一；headless Codex CLI；默认 `gpt-5.6-sol`；不直接编辑代码 |
 | Auditor | 只读语义审计；headless Codex CLI；默认 `gpt-5.6-sol`；只向 Planner 提交结果 |
-| Verifier | 独立只读复核；headless Codex CLI；默认 `gpt-5.6-sol`；当前在子任务 Gate 后和 Mission 终局调用 |
+| Verifier | 独立只读复核；headless Codex CLI；默认 `gpt-5.6-sol`；新 Mission 正常路径只在 Mission 终局调用，历史 `VERIFIER_PENDING` Task 恢复仍可调用 |
 | Worker | AO Chat-mode Codex Worker；harness=`codex`；model=`gpt-5.6-sol` |
 | Observer | 确定性程序；无模型 |
 | Integration Gate | 确定性程序；无模型 |
 
 Auditor、Verifier 和 Observer 都不直接向 Worker 下发自动执行指令。当前系统
-仍允许多个子任务；默认单 Worker、按需第二 Worker，以及终局/高风险才调用
-Verifier，是 R3 的后续目标。
+仍允许多个子任务；默认单 Worker、按需第二 Worker 仍待后续收敛。VerifierProvider
+仍是正式角色；高风险子任务的显式按需策略尚未实现。
+
+当前正常路径为：
+
+```text
+Worker
+→ Completion Auditor
+→ Planner
+→ deterministic Task Gate
+→ DONE
+
+materialization
+→ integration
+→ Final Gate
+→ Mission Verifier
+→ MISSION_DONE / HUMAN
+```
+
+新 Task Gate PASS 不调用 Task Verifier、不写 task-level verification row；历史
+runtime 若已处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。Mission
+Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。
 
 ## 目录结构
 
@@ -94,16 +114,16 @@ bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完�
 - Panel/CLI 的 AO Codex Worker 执行；
 - Observer 确定性观察；
 - Auditor → Planner 闭环；
-- Integration Gate 和当前 Verifier；
+- deterministic Task Gate、Mission Final Gate 和 Mission Verifier；
 - StateStore 恢复、stop/resume；
 - UI 时间线与派生的 Markdown/JSONL。
 
 仍待后续：
 
-- PR #6 合并后先运行一次完整真实 E2E Mission；
-- 随后优先做 Competition behavior convergence：默认 1 个 Worker、按需最多
-  2 个，Verifier 默认 final/终局调用，并隐藏或显式标记
-  `auto_ff_master` 为实验性高风险功能；
+- Verifier final-only 已完成，合并当前 PR 后待一次同题真实性能 E2E；
+- 下一项进行 Completion Auditor / Planner happy-path convergence；
+- 默认 1 个 Worker、按需最多 2 个，以及隐藏或显式标记
+  `auto_ff_master` 为实验性高风险功能，仍待后续；
 - 比赛行为收敛后再做重复模块和旧入口清理；
 - 最后完成 clean delivery、installer/bootstrap、AO first-run 和 CI 收尾；
 - fingerprint/source 与 thread revision 继续保持低优先级。

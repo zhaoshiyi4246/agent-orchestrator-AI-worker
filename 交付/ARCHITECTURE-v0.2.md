@@ -59,7 +59,7 @@ Panel 自行维护轮询线程，没有调用 `run_loop()`，但没有创建第�
 |---|---|---|---|
 | Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 拆解 Mission、接收 Audit/Gate/Verifier 证据并裁决；不直接编辑代码 |
 | Auditor | 1 个只读 headless Codex CLI Provider | `gpt-5.6-sol` | 做语义审计并向 Planner 提交结果；不直接向 Worker 下发自动指令 |
-| Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 当前在子任务 Gate 后和 Mission 终局调用；只输出验证结果，不拥有 Worker 控制权 |
+| Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 新 Mission 正常路径只在 Mission 终局调用；历史 `VERIFIER_PENDING` Task 恢复仍可调用；不拥有 Worker 控制权 |
 | Worker | AO Chat-mode Codex Worker | `gpt-5.6-sol` | harness=`codex`；在 AO worktree 执行具体编码任务 |
 | Observer | 确定性普通程序 | no model | 从 AO 事件产生 trigger 与 evidence，不做语义裁决 |
 | Integration Gate | 确定性普通程序 | no model | 运行预配置显式 argv，记录退出码、输出与 Git 证据 |
@@ -86,8 +86,31 @@ Panel Mission payload、`MissionSpec`、`TaskSpec`、当前
 `max_subtasks=2`。默认 1 个 Worker、只有任务确实独立时才启用第 2 个，是
 R3 目标，不是当前实现不变量。
 
-Verifier 当前仍在每个子任务 Gate 后和 Mission 最终 Gate 后调用。“只在终局
-或高风险场景调用”是 R3 目标，不是当前事实。
+当前真实 Task happy path 仍保留 Completion Auditor + Planner：
+
+```text
+Worker
+→ Completion Auditor
+→ Planner
+→ deterministic Task Gate
+→ DONE
+```
+
+新 Task Gate PASS 不调用 Task Verifier，也不写 task-level verification row。
+历史 runtime 若已经处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
+
+当前 Mission final path 是：
+
+```text
+materialization
+→ integration
+→ Final Gate
+→ Mission Verifier
+→ MISSION_DONE / HUMAN
+```
+
+Mission Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。VerifierProvider
+仍是正式角色；高风险子任务的显式按需策略尚未实现。
 
 ## 三、控制权与真实消息路径
 
@@ -205,7 +228,8 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 - Observer 确定性观察；
 - Auditor → Planner 闭环；
 - Integration Gate；
-- 当前子任务级与 Mission 终局 Verifier；
+- deterministic Task Gate、Mission Final Gate 与 Mission Verifier；
+- 历史 `VERIFIER_PENDING` task verifier 恢复；
 - StateStore 持久化和恢复；
 - stop/resume；
 - Store 后置投影与 UI 时间线。
@@ -216,9 +240,10 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 
 - R2：生成主路径引用图，逐组证明并收敛重复 AO Client、Observer、Gate、
   协议和旧 CLI；在此之前不删除参考目录或兼容模块。
-- R3：默认 1 个 Worker、必要时最多 2 个；收敛 Verifier 调用策略、
-  issue fingerprint 和 thread revision；决定保留当前有界 L0 fast path，还是将
-  自动 Worker 指令统一由 Planner 发出。
+- R3：Verifier final-only 已完成，待一次同题真实性能 E2E；下一项进行
+  Completion Auditor / Planner happy-path convergence；默认 1 个 Worker、必要时
+  最多 2 个、issue fingerprint 和 thread revision 仍待后续；决定保留当前有界
+  L0 fast path，还是将自动 Worker 指令统一由 Planner 发出。
 - R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
   保持自动 push/merge 默认关闭。
 - R5：CI、全新 clone 安装、AO 官方依赖说明、路径可移植性、真实 Demo 和
