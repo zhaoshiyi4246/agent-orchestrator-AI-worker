@@ -23,6 +23,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -327,30 +328,54 @@ def _git_check(worktree: str, *args: str, timeout: int = 60) -> Tuple[bool, str]
         return False, str(e)
 
 
-def commit_all(worktree: str, message: str) -> Optional[str]:
+def commit_all(worktree: str, message: str) -> str:
     """Sidecar-side commit of everything in the worker's worktree.
 
     Called ONLY by trusted controller code (never the worker) so the merge
-    pipeline has a clean commit to fetch. Returns the new HEAD, or None when
-    there was nothing to commit / git failed.
+    pipeline has a clean commit to fetch. A clean worktree returns its current
+    HEAD. Materialization gets one short retry for transient local Git
+    failures; persistent failures raise with bounded, stage-specific Git
+    output so the controller can preserve the real evidence.
     """
+    head = _current_head(worktree)
+    if not head:
+        raise RuntimeError("git inspection failed: unable to read current HEAD")
+
     # exclude artifacts from the commit (they'd collide across worktrees):
     # the add itself carries the exclude pathspecs — `git add -A -- .` alone
     # would still sweep __pycache__/*.pyc into the integration branch and
     # same-file binary conflicts would surface as spurious Planner CONFLICTs.
-    changed = changed_paths(worktree, _current_head(worktree) or "")
+    changed = changed_paths(worktree, head)
     if changed is None:
-        return None  # git error — fail closed, nothing trustworthy to commit
+        raise RuntimeError(
+            "git inspection failed: unable to inspect Worker changes")
     if not changed:
-        return _current_head(worktree)
-    ok, _ = _git_check(worktree, "add", "-A", "--", ".",
-                       *_ARTIFACT_EXCLUDES)
-    if not ok:
-        return None
-    ok, _ = _git_check(worktree, "commit", "-q", "-m", message)
-    if not ok:
-        return None
-    return _current_head(worktree)
+        return head
+
+    last_stage = "git commit"
+    last_detail = ""
+    for attempt in range(2):
+        ok, detail = _git_check(worktree, "add", "-A", "--", ".",
+                                *_ARTIFACT_EXCLUDES)
+        if not ok:
+            last_stage, last_detail = "git add", detail
+        else:
+            ok, detail = _git_check(worktree, "commit", "-q", "-m",
+                                    message)
+            if ok:
+                committed_head = _current_head(worktree)
+                if not committed_head:
+                    raise RuntimeError(
+                        "git commit succeeded but reading HEAD failed")
+                return committed_head
+            last_stage, last_detail = "git commit", detail
+
+        if attempt == 0:
+            time.sleep(0.5)
+
+    detail = (last_detail or "<no git output>").strip()
+    raise RuntimeError("%s failed: %s" %
+                       (last_stage, _head_tail(detail, 1000)))
 
 
 def _main_head(repo_path: str) -> Optional[str]:

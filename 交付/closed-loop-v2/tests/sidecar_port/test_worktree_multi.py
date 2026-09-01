@@ -10,6 +10,8 @@ Covers the two properties that make N parallel workers safe:
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from loopcore import worktree as wt
 from loopcore.state_store import StateStore
 
@@ -131,6 +133,122 @@ def test_commit_all_no_changes_returns_head(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     head = wt._current_head(repo)
     assert wt.commit_all(repo, "noop") == head
+
+
+def _mock_materialization(monkeypatch, add_results, commit_results,
+                          final_head="NEW"):
+    calls = []
+    heads = iter(["BASE", final_head])
+    adds = iter(add_results)
+    commits = iter(commit_results)
+
+    monkeypatch.setattr(wt, "_current_head", lambda _path: next(heads))
+    monkeypatch.setattr(wt, "changed_paths", lambda *_args: ["app.py"])
+    monkeypatch.setattr(wt.time, "sleep", lambda _seconds: None)
+
+    def git_check(_path, *args, **_kwargs):
+        calls.append(args)
+        if args[0] == "add":
+            return next(adds)
+        if args[0] == "commit":
+            return next(commits)
+        raise AssertionError("unexpected git command: %r" % (args,))
+
+    monkeypatch.setattr(wt, "_git_check", git_check)
+    return calls
+
+
+def test_commit_all_retries_commit_once_then_succeeds(monkeypatch):
+    calls = _mock_materialization(
+        monkeypatch,
+        add_results=[(True, ""), (True, "")],
+        commit_results=[(False, "transient stderr"), (True, "")])
+
+    assert wt.commit_all("worker", "subtask S1") == "NEW"
+    assert [args[0] for args in calls].count("commit") == 2
+    assert [args[0] for args in calls] == ["add", "commit", "add", "commit"]
+
+
+def test_commit_all_raises_after_two_commit_failures(monkeypatch):
+    calls = _mock_materialization(
+        monkeypatch,
+        add_results=[(True, ""), (True, "")],
+        commit_results=[(False, "first fake stderr"),
+                        (False, "last fake stderr")])
+
+    with pytest.raises(RuntimeError) as raised:
+        wt.commit_all("worker", "subtask S1")
+
+    assert "git commit failed" in str(raised.value)
+    assert "last fake stderr" in str(raised.value)
+    assert [args[0] for args in calls].count("commit") == 2
+
+
+def test_commit_all_recovers_from_first_add_failure(monkeypatch):
+    calls = _mock_materialization(
+        monkeypatch,
+        add_results=[(False, "transient add stderr"), (True, "")],
+        commit_results=[(True, "")])
+
+    assert wt.commit_all("worker", "subtask S1") == "NEW"
+    assert [args[0] for args in calls] == ["add", "add", "commit"]
+
+
+def test_commit_all_raises_after_two_add_failures(monkeypatch):
+    calls = _mock_materialization(
+        monkeypatch,
+        add_results=[(False, "first add stderr"),
+                     (False, "last add stderr")],
+        commit_results=[])
+
+    with pytest.raises(RuntimeError) as raised:
+        wt.commit_all("worker", "subtask S1")
+
+    assert "git add failed" in str(raised.value)
+    assert "last add stderr" in str(raised.value)
+    assert [args[0] for args in calls] == ["add", "add"]
+
+
+def test_commit_all_uses_only_add_and_policy_respecting_commit(monkeypatch):
+    calls = _mock_materialization(
+        monkeypatch,
+        add_results=[(True, "")],
+        commit_results=[(True, "")])
+
+    assert wt.commit_all("worker", "subtask S1") == "NEW"
+    flattened = [token for args in calls for token in args]
+    assert [args[0] for args in calls] == ["add", "commit"]
+    assert "--no-verify" not in flattened
+    assert not {"config", "reset", "restore", "checkout"} & set(flattened)
+
+
+def test_commit_all_inspection_failure_is_explicit(monkeypatch):
+    monkeypatch.setattr(wt, "_current_head", lambda _path: None)
+
+    with pytest.raises(RuntimeError, match="git inspection failed"):
+        wt.commit_all("worker", "subtask S1")
+
+
+def test_commit_all_change_inspection_failure_is_explicit(monkeypatch):
+    monkeypatch.setattr(wt, "_current_head", lambda _path: "BASE")
+    monkeypatch.setattr(wt, "changed_paths", lambda *_args: None)
+
+    with pytest.raises(RuntimeError,
+                       match="git inspection failed: unable to inspect"):
+        wt.commit_all("worker", "subtask S1")
+
+
+def test_commit_all_requires_head_after_success(monkeypatch):
+    calls = _mock_materialization(
+        monkeypatch,
+        add_results=[(True, "")],
+        commit_results=[(True, "")],
+        final_head=None)
+
+    with pytest.raises(RuntimeError,
+                       match="git commit succeeded but reading HEAD failed"):
+        wt.commit_all("worker", "subtask S1")
+    assert [args[0] for args in calls] == ["add", "commit"]
 
 
 def test_git_diff_text_excludes_committed_pyc(tmp_path):

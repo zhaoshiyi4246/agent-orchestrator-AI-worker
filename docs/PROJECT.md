@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；第一次真实 GUI E2E 已验证到 AO Codex Worker/Observer，并暴露 active-turn 语义审计时序与 Codex role failure 边界 blocker；当前修复待合并后重跑 GUI smoke
+- 状态：R1 与 R2-0 主链已完成；第二次真实 GUI E2E 已验证到 Task DONE，并暴露 Worker materialization commit 的瞬时失败与错误证据丢失边界；当前修复待合并后进行第三次 GUI smoke
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -139,6 +139,12 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
 - Mission integration worktree 不是 AO Session workspace，由 CL-AO 管理在
   `runtime/<mission-id>/integration`（即 StateStore 同目录的 `integration`）。
   最终 Gate/Verifier 直接复用该路径，不依赖已终止 Worker 的 AO workspace。
+- Task DONE 后的 trusted sidecar materialization commit 是确定性 Git 操作。
+  `commit_all()` 对有改动的 worktree 最多执行 2 次完整 `git add` → `git commit`：
+  第一次失败后只短暂等待并重试一次；persistent failure 以包含有界 Git
+  stdout/stderr 的明确异常 fail closed，由 Mission 记录到现有 reason/evidence 并转
+  `HUMAN`，不会继续创建 integration。该路径不写 Git config、不使用
+  `--no-verify`、不关闭 signing，也不绕过用户 repository 的 hook/signing policy。
 - `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
   只创建生产 Codex Planner，输出结构化 MissionPlan 并直接退出。该路径不
   创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、
