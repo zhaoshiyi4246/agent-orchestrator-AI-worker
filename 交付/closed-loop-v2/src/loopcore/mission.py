@@ -674,11 +674,14 @@ class MissionController:
                 self.executor.kill_worker(task.worker_session_id)
             except Exception:
                 pass  # best-effort; a dead worker is fine, merge must proceed
-            sha = wt.commit_all(worktree, "subtask %s" % sid)
-            if not sha:
-                self._set_state("HUMAN",
-                                "unable to commit Worker workspace for %s"
-                                % sid)
+            try:
+                wt.commit_all(worktree, "subtask %s" % sid)
+            except RuntimeError as exc:
+                detail = str(exc)[:1200]
+                self._set_state(
+                    "HUMAN",
+                    "unable to commit Worker workspace for %s: %s"
+                    % (sid, detail))
                 return
             integ = self._integration_wt(source_worktree=worktree)
             if not integ:

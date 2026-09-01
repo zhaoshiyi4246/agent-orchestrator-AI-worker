@@ -213,6 +213,33 @@ def test_merge_workspace_failure_halts_before_commit(tmp_path):
     commit.assert_not_called()
 
 
+def test_merge_commit_failure_preserves_git_detail(tmp_path):
+    mc, store = _mc(tmp_path)
+    mc.step()
+    sid, task = _bind_done_worker(mc, store)
+    worker = tmp_path / "actual-worker"
+    worker.mkdir()
+    mc.adapter.get_session_workspace.return_value = str(worker)
+
+    with patch.object(mc.executor, "kill_worker") as kill, \
+            patch("loopcore.mission.wt.commit_all",
+                  side_effect=RuntimeError(
+                      "git commit failed: last fake stderr")), \
+            patch.object(mc, "_integration_wt") as integration, \
+            patch("loopcore.mission.wt.merge_worktree") as merge:
+        mc._merge_done()
+
+    reason = mc._read_state().get("reason", "")
+    assert mc.state == "HUMAN"
+    assert "unable to commit Worker workspace for %s" % sid in reason
+    assert "git commit failed: last fake stderr" in reason
+    kill.assert_any_call(task.worker_session_id)
+    integration.assert_not_called()
+    merge.assert_not_called()
+    assert mc.merged == []
+    assert not (Path(store.path).parent / "integration").exists()
+
+
 def test_full_mission_to_done_with_merge(tmp_path):
     """End-to-end fake run: 2 subtasks DONE -> merge -> final verify PASS."""
     import subprocess

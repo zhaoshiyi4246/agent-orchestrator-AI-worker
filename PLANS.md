@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：第一次真实 GUI E2E blocker 修复
-- 当前任务：修复 active Worker 的语义审计时序，以及 Auditor/Verifier provider failure 与业务 verdict 的边界
-- 当前状态：GUI E2E 已验证 Panel → Planner → AO Codex Worker → official Session workspace API → Observer；Worker 实现正确，失败来自过早 audit 与 transport timeout 被伪装成 semantic HUMAN
-- 下一步：本 PR 审计合并后重跑同一 GUI smoke；通过后进入 Competition behavior convergence，不直接进入 R2-1
+- 当前阶段：第二次真实 GUI E2E blocker 修复
+- 当前任务：保留 Worker materialization Git 错误证据，并对瞬时本地 Git failure 做一次有界重试
+- 当前状态：第二次 GUI E2E 已验证 Panel → Planner → AO Worker → completion audit → Planner → Task Gate → Task Verifier → Task DONE；新的最早 blocker 是 Worker materialization commit 的一次性失败，原 stderr 未持久化且事后无法复现
+- 下一步：本 PR 审计合并后进行第三次同一 GUI smoke；通过后进入 Competition behavior convergence，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -224,6 +224,26 @@ Observer。Worker 最终正确实现 `clamp01_e2e`，自身验收命令退出 0�
 直接相关回归 `61 passed in 17.76s`；完整离线基线
 `326 passed in 40.09s`；`compileall` 与 `git diff --check` 均退出 0。本节只记录
 已发生的 E2E 与已实现/离线验证边界；修复后的 GUI E2E 尚待本 PR 合并后重跑。
+
+### 第二次真实 GUI E2E 与 Worker materialization commit recovery
+
+`MISSION-PANEL-20260901-160239` 已真实验证 Panel → Planner → AO Worker →
+completion audit → Planner → Task Gate → Task Verifier → Task DONE。Worker workspace
+中的 `app.py` 实现正确且 `git add` 成功；其后的 trusted sidecar materialization
+`git commit` 返回 nonzero，使 Mission 在 integration 前 fail closed 到 `HUMAN`。
+
+原始 commit failure 的精确根因是 **UNKNOWN**：当时 `commit_all()` 丢弃 stderr，
+后续只读检查不能复现；identity、signing、hook、lock、diff 与 permission 均未发现
+异常，当前 `git commit --dry-run` 成功。因此本任务不得把该事件记录为
+identity/GPG/hook/lock bug，也不针对这些未经证明的原因改写 Git policy。
+
+当前最小修复保持 materialization 为确定性 Git 操作：无改动返回当前 HEAD；有改动
+时最多执行 2 次完整 add/commit，第一次瞬时失败后仅短暂等待一次；第二次仍失败则
+抛出包含最后一次有界 Git stdout/stderr 的 stage-specific 异常。Mission 不增加第二
+层 retry，persistent failure 直接以真实 Git detail 转 `HUMAN`，integration 不创建、
+merged 保持为空。该路径不写 Git config、不使用 `--no-verify`，也不改变用户 hook
+或 signing policy。完整离线基线为 `336 passed in 293.08s`；`compileall` 与
+`git diff --check` 均退出 0。第三次真实 GUI E2E 尚待本 PR 审计合并后运行。
 
 ## 十、已知问题清单
 
