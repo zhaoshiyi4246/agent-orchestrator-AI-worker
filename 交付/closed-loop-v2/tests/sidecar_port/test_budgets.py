@@ -277,6 +277,65 @@ def test_active_repeated_error_waits_for_completion_evidence(tmp_path):
     loop.executor.nudge_worker.assert_not_called()
 
 
+def test_active_repeated_error_preserves_mixed_no_progress_alert(tmp_path):
+    """Only REPEATED_ERROR is deferred; NO_PROGRESS remains actionable."""
+    loop, task, store = _loop(tmp_path, budgets={
+        "max_local_fixes": 5, "max_replans": 1, "max_same_alerts": 5,
+        "max_runtime_seconds": 1800})
+    loop._transition(ProjectState.WORKER_RUNNING, "test", "setup", {})
+    loop.adapter.get_worker_conversation.return_value = {"activities": []}
+    loop.adapter.get_worker_status.return_value = {
+        "id": task.worker_session_id, "status": "running",
+        "activity": {"state": "active"}}
+    events = [
+        ev("2026-08-27T00:0%d:00Z" % i,
+           project=task.project_id, worker=task.worker_session_id,
+           etype="command_executed", message="command #%d" % i)
+        for i in range(5)
+    ]
+    # The eighth event is both the third same-fingerprint error and the
+    # eighth activity without strong progress, so one Observer evaluation
+    # returns REPEATED_ERROR + NO_PROGRESS together.
+    events += [
+        ev("2026-08-27T00:0%d:00Z" % i,
+           project=task.project_id, worker=task.worker_session_id,
+           etype="error", message="provider transport failed",
+           fingerprint="provider-fp")
+        for i in range(5, 8)
+    ]
+    loop._collect_events = MagicMock(return_value=events)
+    loop.executor.nudge_worker = MagicMock()
+    loop._run_gate_capture = MagicMock(return_value=(None, ""))
+    loop._git_diff = MagicMock(return_value="active workspace diff")
+    loop.auditor = MagicMock()
+    loop.auditor.audit.return_value = AuditResult(
+        audit_id="AUDIT-NO-PROGRESS", task_id=task.task_id,
+        decision=AuditDecision.LOCAL_FIX, evidence=[],
+        diagnosis="no progress", confidence=0.9,
+        failed_criteria=["AC-01"])
+    loop._to_planner = MagicMock()
+    handle_alerts = loop._handle_alerts
+    loop._handle_alerts = MagicMock(wraps=handle_alerts)
+
+    result = loop.step()
+
+    persisted = [json.loads(row[0])["alert_type"] for row in
+                 store._conn.execute(
+                     "SELECT payload_json FROM alerts").fetchall()]
+    assert sorted(persisted) == ["NO_PROGRESS", "REPEATED_ERROR"]
+    loop._handle_alerts.assert_called_once()
+    actionable = loop._handle_alerts.call_args.args[0]
+    assert [alert.alert_type for alert in actionable] == ["NO_PROGRESS"]
+    audited_bundle = loop.auditor.audit.call_args.args[0]
+    assert audited_bundle.alert["alert_type"] == "NO_PROGRESS"
+    assert [alert["alert_type"] for alert in audited_bundle.alerts] == [
+        "NO_PROGRESS"]
+    assert result["acted"] is True
+    assert loop.state == ProjectState.AUDIT_PENDING
+    loop._to_planner.assert_called_once()
+    loop.executor.nudge_worker.assert_not_called()
+
+
 def test_l0_does_not_consume_local_fix_budget(tmp_path):
     loop, task, store = _loop(tmp_path, budgets={
         "max_local_fixes": 2, "max_replans": 1, "max_same_alerts": 5,
