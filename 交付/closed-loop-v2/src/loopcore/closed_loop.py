@@ -322,19 +322,28 @@ class ClosedLoop:
         # audits the latest workspace instead.  Unknown status fails closed
         # to the established alert path; only an explicit activity=active
         # defers it.  NO_PROGRESS semantics are intentionally unchanged.
-        active_repeated_error = False
+        worker_active = False
         if new_alerts and any(
                 getattr(alert, "alert_type", "") == "REPEATED_ERROR"
                 for alert in new_alerts):
             worker_status = self._worker_status()
-            active_repeated_error = (
+            worker_active = (
                 isinstance(worker_status, dict)
                 and isinstance(worker_status.get("activity"), dict)
                 and worker_status["activity"].get("state") == "active")
-        if new_alerts and not active_repeated_error:
+        actionable_alerts = new_alerts
+        if worker_active:
+            actionable_alerts = [
+                alert for alert in new_alerts
+                if getattr(alert, "alert_type", "") != "REPEATED_ERROR"]
+        if actionable_alerts:
             # L1: project-level semantic failure -> Auditor + Planner.
             result["acted"] = True
-            self._handle_alerts(new_alerts, events)
+            self._handle_alerts(actionable_alerts, events)
+        elif new_alerts:
+            # The batch contained only active-turn REPEATED_ERROR alerts.
+            # They are already durable; do not fall through to L0/completion.
+            pass
         elif not new_alerts:
             acted_l0 = False
             if fresh_errors and self.state == ProjectState.WORKER_RUNNING:
