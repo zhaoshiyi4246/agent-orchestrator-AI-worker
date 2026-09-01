@@ -50,8 +50,8 @@ def _make_loop(tmp_path, monkeypatch, activities):
     wt = tmp_path / "worktrees" / task.project_id / task.worker_session_id
     wt.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(wt), check=True)
-    monkeypatch.setenv("AO_DATA_DIR", str(tmp_path))
     adapter = MagicMock()
+    adapter.get_session_workspace.return_value = str(wt)
     adapter.get_recent_events.return_value = []
     adapter.get_worker_conversation.return_value = {"activities": activities}
     adapter.resolve_approval.return_value = True

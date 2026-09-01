@@ -35,7 +35,6 @@ def _make_loop(tmp_path, monkeypatch, states):
     task = TaskSpec.from_dict(_task_spec())
     task.worker_session_id = "w-crash"
     task.gate_commands = ["python -c \"print('gate ok')\""]
-    # worktree layout: <AO_DATA_DIR>/worktrees/<project>/<session>
     wt = tmp_path / "worktrees" / task.project_id / task.worker_session_id
     wt.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=str(wt), check=True)
@@ -49,9 +48,9 @@ def _make_loop(tmp_path, monkeypatch, states):
     (wt / "app.py").write_text("def divide(a, b):\n    return a / b\n"
                                "def square(a):\n    return a * a\n",
                                encoding="utf-8")
-    monkeypatch.setenv("AO_DATA_DIR", str(tmp_path))
     obs = Observer(_cfg(), state_store=store)
     adapter = MagicMock()
+    adapter.get_session_workspace.return_value = str(wt)
     adapter.get_recent_events.return_value = []
     ex = ActionExecutor("ao", "d", "r", store)
     loop = ClosedLoop(task=task, cfg=_cfg(), auditor=FakeAuditorProvider(),

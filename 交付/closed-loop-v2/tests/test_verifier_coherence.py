@@ -74,8 +74,8 @@ def _make_loop(tmp_path, monkeypatch, verifier):
     subprocess.run(["git", "add", "-A"], cwd=str(wtdir), check=True)
     subprocess.run(["git", "commit", "-qm", "init"], cwd=str(wtdir),
                    check=True)
-    monkeypatch.setenv("AO_DATA_DIR", str(tmp_path))
     adapter = MagicMock()
+    adapter.get_session_workspace.return_value = str(wtdir)
     adapter.get_worker_status.return_value = {"id": task.worker_session_id,
                                               "status": "idle"}
     task.gate_commands = ["python -c \"pass\""]

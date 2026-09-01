@@ -73,7 +73,6 @@ def test_extract_failure_ids():
 
 def _seed_done_mission(tmp_path):
     """A mission with both subtasks DONE and merged (reuses test_mission)."""
-    import os
     data_dir = tmp_path / "ao-data"
     proj = data_dir / "worktrees" / "closed-loop-demo"
     proj.mkdir(parents=True)
@@ -83,17 +82,19 @@ def _seed_done_mission(tmp_path):
     (proj / "app.py").write_text("x=1\n", encoding="utf-8")
     _git(proj, "add", "-A")
     _git(proj, "commit", "-q", "-m", "init")
+    workers = {}
     for name in ("sess-S1", "sess-S2"):
         _git(proj, "worktree", "add", "-q", "-b", name,
              str(proj / name))
+        workers[name] = proj / name
     (proj / "sess-S1" / "app.py").write_text(
         "def divide(a,b):\n    if b==0: raise ValueError\n    return a/b\n",
         encoding="utf-8")
     (proj / "sess-S2" / "math2.py").write_text(
         "def multiply(a,b): return a*b\n", encoding="utf-8")
-    os.environ["AO_DATA_DIR"] = str(data_dir)
-
     mc, store = _mc(tmp_path)
+    mc.adapter.get_session_workspace.side_effect = (
+        lambda session_id: str(workers[session_id]))
     mc.step()  # decompose
 
     def fake_spawn(task):

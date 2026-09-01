@@ -40,11 +40,10 @@ class _ScriptedVerifier:
 def _loop(tmp_path, verifier, *, fake_gate_run_ok=True):
     """Build a ClosedLoop with a REAL minimal git worktree under tmp_path.
 
-    _run_gate/_run_verifier resolve the worktree from AO_DATA_DIR and compute
-    real changed paths / path violations against it, so the test needs a
-    genuine git repo with an app.py edit.
+    _run_gate/_run_verifier resolve the worktree through the AO adapter and
+    compute real changed paths / path violations against it, so the test needs
+    a genuine git repo with an app.py edit.
     """
-    import os
     import subprocess
     from loopcore.mission_contracts import TaskSpec
     data_dir = tmp_path / "ao-data"
@@ -60,12 +59,12 @@ def _loop(tmp_path, verifier, *, fake_gate_run_ok=True):
     (wt / "app.py").write_text(
         "def add(a,b): return a+b\ndef divide(a,b):\n"
         "    if b==0: raise ValueError\n    return a/b\n", encoding="utf-8")
-    os.environ["AO_DATA_DIR"] = str(data_dir)
     store = StateStore(tmp_path / "cl.db")
     task = TaskSpec.from_dict(_task_spec())
     task.worker_session_id = "w1"
     obs = Observer(_cfg(), state_store=store)
     adapter = MagicMock()
+    adapter.get_session_workspace.return_value = str(wt)
     adapter.get_recent_events.return_value = []
     adapter.get_worker_status.return_value = {"id": "w1", "status": "idle"}
     gate = IntegrationGate(store)
