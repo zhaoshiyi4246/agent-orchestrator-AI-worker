@@ -135,6 +135,109 @@ def test_commit_all_no_changes_returns_head(tmp_path):
     assert wt.commit_all(repo, "noop") == head
 
 
+def test_commit_all_materializes_source_beside_ignored_cache(tmp_path):
+    """Real regression for MISSION-PANEL-20260901-200228."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run(repo, "init", "-q")
+    _run(repo, "config", "user.name", "t")
+    _run(repo, "config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(
+        "**pycache**/\n*.pyc\n.pytest_cache/\n", encoding="utf-8")
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _run(repo, "add", "--", ".gitignore", "app.py")
+    _run(repo, "commit", "-q", "-m", "baseline")
+    baseline = wt._current_head(repo)
+
+    (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+    cache = repo / "__pycache__" / "app.cpython-312.pyc"
+    cache.parent.mkdir()
+    cache.write_bytes(b"\x00\x01\x02")
+    assert _run(repo, "check-ignore", str(cache.relative_to(repo))).returncode == 0
+
+    head = wt.commit_all(repo, "subtask S1")
+
+    assert head != baseline
+    committed = _run(repo, "diff-tree", "--no-commit-id", "--name-only",
+                     "-r", head).stdout.splitlines()
+    assert committed == ["app.py"]
+    assert _run(repo, "show", "HEAD:app.py").stdout == "x = 2\n"
+    assert _run(repo, "status", "--short").stdout == ""
+    assert cache.is_file()
+
+
+def test_commit_all_materializes_untracked_source(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "new_module.py").write_text("value = 2\n", encoding="utf-8")
+
+    head = wt.commit_all(repo, "add source")
+
+    assert "new_module.py" in _run(repo, "ls-tree", "--name-only",
+                                    head).stdout.splitlines()
+    assert _run(repo, "status", "--short").stdout == ""
+
+
+def test_commit_all_materializes_deleted_source(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    deleted = repo / "obsolete.py"
+    deleted.write_text("obsolete = True\n", encoding="utf-8")
+    _run(repo, "add", "--", "obsolete.py")
+    _run(repo, "commit", "-q", "-m", "add obsolete source")
+    baseline = wt._current_head(repo)
+    deleted.unlink()
+
+    head = wt.commit_all(repo, "delete source")
+
+    assert head != baseline
+    assert "obsolete.py" not in _run(repo, "ls-tree", "--name-only",
+                                      head).stdout.splitlines()
+    assert _run(repo, "diff-tree", "--no-commit-id", "--name-status",
+                "-r", head).stdout.strip() == "D\tobsolete.py"
+
+
+def test_commit_all_materializes_already_staged_source(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    baseline = wt._current_head(repo)
+    (repo / "app.py").write_text("x = 3\n", encoding="utf-8")
+    _run(repo, "add", "--", "app.py")
+
+    head = wt.commit_all(repo, "staged source")
+
+    assert head != baseline
+    assert _run(repo, "show", "HEAD:app.py").stdout == "x = 3\n"
+    assert _run(repo, "status", "--short").stdout == ""
+
+
+def test_commit_all_does_not_force_user_ignored_file(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+    _run(repo, "add", "--", ".gitignore")
+    _run(repo, "commit", "-q", "-m", "ignore policy")
+    (repo / ".env").write_text("LOCAL_ONLY=1\n", encoding="utf-8")
+    (repo / "app.py").write_text("x = 4\n", encoding="utf-8")
+
+    head = wt.commit_all(repo, "respect ignore policy")
+
+    tracked = _run(repo, "ls-tree", "--name-only", head).stdout.splitlines()
+    assert ".env" not in tracked
+    assert _run(repo, "check-ignore", ".env").returncode == 0
+    assert (repo / ".env").is_file()
+    assert _run(repo, "status", "--short").stdout == ""
+
+
+def test_commit_all_uses_literal_pathspec_for_space_in_path(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    source = repo / "module with space.py"
+    source.write_text("value = 5\n", encoding="utf-8")
+
+    head = wt.commit_all(repo, "space path")
+
+    assert "module with space.py" in _run(
+        repo, "ls-tree", "--name-only", head).stdout.splitlines()
+    assert _run(repo, "show", "HEAD:module with space.py").stdout == \
+        "value = 5\n"
+
+
 def _mock_materialization(monkeypatch, add_results, commit_results,
                           final_head="NEW"):
     calls = []
@@ -218,6 +321,8 @@ def test_commit_all_uses_only_add_and_policy_respecting_commit(monkeypatch):
     assert wt.commit_all("worker", "subtask S1") == "NEW"
     flattened = [token for args in calls for token in args]
     assert [args[0] for args in calls] == ["add", "commit"]
+    assert calls[0] == ("add", "-A", "--", ":(literal)app.py")
+    assert "-f" not in flattened
     assert "--no-verify" not in flattened
     assert not {"config", "reset", "restore", "checkout"} & set(flattened)
 
