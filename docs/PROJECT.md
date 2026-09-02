@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；PR #12 后的真实 E2E `MISSION-PANEL-20260902-115314` 证明 gate-first 会被 Mission shared routing 重放的历史 AO error 阻断；当前进行 Competition behavior convergence #2 的 event-freshness 最小修复
+- 状态：R1 与 R2-0 主链已完成；Verifier final-only、gate-first、event freshness 已完成；当前进行 Competition behavior convergence #3 的默认单 Worker 收敛
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -148,11 +148,11 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   异常 fail closed，由 Mission 记录到现有 reason/evidence 并转 `HUMAN`，不会继续
   创建 integration。该路径不写 Git config、不使用 `--no-verify`、不关闭 signing，
   也不绕过用户 repository 的 hook/signing policy。
-- `run_mission.py --dry-run` 现已收敛为 Planner 分解预检：解析 Mission 后
-  只创建生产 Codex Planner，输出结构化 MissionPlan 并直接退出。该路径不
+- `run_mission.py --dry-run` 解析 Mission 后输出结构化 MissionPlan 并直接退出：
+  `max_subtasks=1` 时确定性生成单任务计划且不构造 Planner，值为 2 时才创建
+  生产 Codex Planner。该路径不
   创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、
-  Verifier、Worker、Gate 或 LoopBus，不连接 AO，也不修改用户项目。它仍会
-  发起一次真实模型调用，因此不是离线模式；离线覆盖由 mock 测试提供。
+  Verifier、Worker、Gate 或 LoopBus，不连接 AO，也不修改用户项目。
 
 共享 Codex runner 是 Planner/Auditor/Verifier 的统一复用边界。它不持久化
 Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试。
@@ -197,8 +197,19 @@ activity cursor 只是同一进程的路由边界；`fresh_errors` 还必须通�
 仍保留：历史 runtime 若已持久化在 `VERIFIER_PENDING`，`ClosedLoop.step()` 会继续
 调用 Verifier，并按原有 PASS/FAIL、provider retry、budget 与 crash-resume 语义完成
 恢复。Mission-level Final Gate 与 Mission Verifier 完全保留；final gate PASS +
-verifier PASS 仍得到 `MISSION_DONE` 并写入 mission-level verification row。当前
-Mission 仍允许多个子任务；默认 1 个 Worker、必要时最多 2 个是后续 R3 目标。
+verifier PASS 仍得到 `MISSION_DONE` 并写入 mission-level verification row。
+
+新 Mission 的 `max_subtasks` 默认值为 1，Panel 只接受 1 或 2 并明确拒绝其它值。
+首次分解时，值为 1 由 `MissionController` 确定性生成唯一
+`<mission-id>-S1`，完整继承 Mission objective、allowed paths、验收条件和 Gate；
+现有 TaskSpec materialization 继续继承 forbidden paths、user instruction、budgets、
+worker harness 与 `subtask_of`。值为 2 时才调用 `Planner.plan_decompose()`；Planner
+contract 允许返回 1 或 2，默认优先 1，仅在路径/验收可独立且有真实并行收益时返回
+2。新 Mission 的其它值在首次分解前明确拒绝，不做 clamp。
+
+`_hydrate()` 仍先读取已持久化的标准 MissionPlan；已有 2-task 或更多 task 的历史
+存档不会应用新建上限、不会重新 decomposition。`roles.max_parallel_workers=2`
+当前没有运行时 consumer，仍保留为能力上限；它不决定新 Mission 默认创建数量。
 
 Observer alert 是持久化运行事实，不等于立即执行语义干预。当前 `ClosedLoop`
 对 `REPEATED_ERROR` 增加了一条严格时序边界：若 AO 明确报告
@@ -538,8 +549,8 @@ UI → 绕过 MissionController 改状态
    `MissionController` 控制平面与 Store 后置投影。
 2. `closed-loop-v2` 内同时保留两套 AO Client、Observer、Gate、协议和多套
    CLI，其中一套进入主路径，另一套主要是兼容或历史来源。
-3. 默认 Mission 的 `max_subtasks=2`，Planner 提示在该值大于 1 时要求拆成
-   `2..max_subtasks`，因此当前默认不是单 Worker。
+3. 已收敛：新 Mission 默认 `max_subtasks=1`，确定性生成单任务计划；值为 2
+   时 Planner 可返回 1 或 2，不再强制为了多智能体而拆分。
 4. 普通 Task 调用频率已完成两步收敛：新 Task Gate PASS 直接 DONE，不再默认
    调用 Task Verifier；证据充分的首次普通 completion 先运行 deterministic Task
    Gate，不调用 Completion Auditor 或 completion Planner。证据不足、Gate FAIL、
@@ -564,17 +575,17 @@ UI → 绕过 MissionController 改状态
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
 - R2：R2-0 先修复 AO 主运行路径可移植性；重复模块、旧入口和参考代码清理延后
   到比赛行为收敛之后；
-- R3：Competition behavior convergence 已启动；Verifier final-only 与 gate-first
-  happy path 已完成离线实现，后续收敛默认 Worker 1/最多 2、`auto_ff_master`
-  实验性高风险边界；
+- R3：Competition behavior convergence 已启动；Verifier final-only、gate-first、
+  event freshness 与默认 Worker 1/按需最多 2 已完成离线实现；后续收敛
+  `auto_ff_master` 实验性高风险边界；
   fingerprint/thread revision 保持低优先级；
 - R4：收敛配置、项目选择和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。
 
 当前执行优先级为：Competition behavior convergence → 重复模块清理 → clean
-delivery/installer/first-run。gate-first happy path PR 审计合并后先运行一次同题性能
-GUI E2E；本轮不改变异常 Auditor/Planner、retry、alert/L0 或 Mission final 语义，
-也不立即开始 R2-1。
+delivery/installer/first-run。默认单 Worker PR 审计合并后可使用固定
+`tasks/e2e-smoke.json` 运行一次标准 GUI E2E；本轮不改变异常 Auditor/Planner、
+retry、alert/L0 或 Mission final 语义，也不立即开始 R2-1。
 
 ## 十、明确非目标
 

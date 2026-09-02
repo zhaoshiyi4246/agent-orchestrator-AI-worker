@@ -320,6 +320,31 @@ def validate_verifier_result(d: Dict) -> Tuple[bool, str]:
 
 
 # --------------------------------------------------------------- mission
+def new_mission_max_subtasks(budgets: Optional[Dict]) -> int:
+    """Validate the Worker budget for a newly-created mission.
+
+    Persisted MissionPlans intentionally bypass this check: old runtimes may
+    already contain more than two subtasks and must remain resumable without
+    re-decomposition.
+    """
+    raw = (budgets or {}).get("max_subtasks", 1)
+    if isinstance(raw, bool):
+        raise ValueError(
+            "budgets.max_subtasks must be 1 or 2 for a new mission")
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw not in ("1", "2"):
+            raise ValueError(
+                "budgets.max_subtasks must be 1 or 2 for a new mission")
+        value = int(raw)
+    elif isinstance(raw, (int, float)) and raw in (1, 2):
+        value = int(raw)
+    else:
+        raise ValueError(
+            "budgets.max_subtasks must be 1 or 2 for a new mission")
+    return value
+
+
 @dataclass
 class MissionSpec:
     """One complete user instruction — the unit of 'fire and forget'.
@@ -338,7 +363,7 @@ class MissionSpec:
     user_instruction: str = ""
     worker_harness: str = "codex"
     budgets: Dict = field(default_factory=lambda: {
-        "max_subtasks": 5, "max_total_replans": 3,
+        "max_subtasks": 1, "max_total_replans": 3,
         "max_runtime_seconds": 7200})
 
     def to_dict(self) -> Dict:
@@ -347,6 +372,8 @@ class MissionSpec:
     @classmethod
     def from_dict(cls, d: Dict) -> "MissionSpec":
         acs = [AcceptanceCriterion(**a) for a in d.get("acceptance_criteria", [])]
+        budgets = dict(d.get("budgets", {}))
+        budgets.setdefault("max_subtasks", 1)
         return cls(
             mission_id=d["mission_id"], project_id=d["project_id"],
             objective=d["objective"],
@@ -356,7 +383,7 @@ class MissionSpec:
             gate_commands=list(d.get("gate_commands", [])),
             user_instruction=d.get("user_instruction", ""),
             worker_harness=d.get("worker_harness", "codex"),
-            budgets=dict(d.get("budgets", {})))
+            budgets=budgets)
 
 
 @dataclass

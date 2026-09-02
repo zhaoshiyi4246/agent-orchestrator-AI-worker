@@ -368,23 +368,15 @@ def test_dry_run_outputs_plan_without_runtime_or_ao(monkeypatch, tmp_path,
     mission_path = tmp_path / "mission.json"
     mission_path.write_text(json.dumps(MISSION), encoding="utf-8")
 
-    class DryPlanner:
-        model = "configured-model"
-
-        def plan_decompose(self, mission, plan_id):
-            assert mission["mission_id"] == "M-CODEX"
-            return MissionPlan.from_dict(_plan())
-
     monkeypatch.setattr(run_mission, "load_config", lambda: {
         "roles": {"planner": {"model": "configured-model"}}})
     monkeypatch.setattr(run_mission, "ROOT", tmp_path)
-    monkeypatch.setattr(run_mission, "build_planner",
-                        lambda *a, **k: DryPlanner())
 
     def forbidden(*args, **kwargs):
         raise AssertionError("dry-run instantiated a forbidden runtime part")
 
-    for name in ("setup_environment", "build_runtime", "MissionRuntime",
+    for name in ("build_planner", "setup_environment", "build_runtime",
+                 "MissionRuntime",
                  "StateStore", "AOAdapter", "ActionExecutor",
                  "CodexCliAuditorProvider", "CodexCliVerifierProvider",
                  "IntegrationGate", "LoopBus"):
@@ -396,8 +388,8 @@ def test_dry_run_outputs_plan_without_runtime_or_ao(monkeypatch, tmp_path,
     output = json.loads(capsys.readouterr().out)
     assert output["mission_id"] == "M-CODEX"
     assert output["dry_run"] is True
-    assert output["planner_provider"] == "DryPlanner"
-    assert output["model"] == "configured-model"
+    assert output["planner_provider"] is None
+    assert output["model"] is None
     assert output["subtask_count"] == 1
     assert output["plan"]["subtasks"][0]["subtask_id"] == "M-CODEX-S1"
     assert not (tmp_path / "runtime").exists()
@@ -406,7 +398,8 @@ def test_dry_run_outputs_plan_without_runtime_or_ao(monkeypatch, tmp_path,
 def test_dry_run_provider_failure_is_brief_and_returns_two(monkeypatch,
                                                            tmp_path, capsys):
     mission_path = tmp_path / "mission.json"
-    mission_path.write_text(json.dumps(MISSION), encoding="utf-8")
+    mission = dict(MISSION, budgets={"max_subtasks": 2})
+    mission_path.write_text(json.dumps(mission), encoding="utf-8")
 
     class FailingPlanner:
         model = "gpt-5.6-sol"

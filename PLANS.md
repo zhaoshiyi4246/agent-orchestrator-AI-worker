@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R3 Competition behavior convergence
-- 当前任务：Competition behavior convergence #2 follow-up — Mission shared-routing event freshness
-- 当前状态：真实 Mission `MISSION-PANEL-20260902-115314` 已定位历史 AO error 被重放为 fresh error 的根因；per-worker activity cursor 与 persistent `event_id` freshness 修复已通过完整离线基线
-- 下一步：创建本修复 PR；审计合并后可重跑同题 gate-first 性能 GUI E2E，随后继续其余 Competition behavior convergence，不直接进入 R2-1
+- 当前任务：Competition behavior convergence #3 — default single Worker
+- 当前状态：新 Mission 默认 1 Worker、按需最多 2 已完成；定向回归、完整离线基线、语法与文档检查均通过
+- 下一步：创建本任务 PR；审计合并后可用固定 `tasks/e2e-smoke.json` 运行一次标准 GUI E2E，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -31,7 +31,7 @@
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
-| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#2 gate-first event freshness） |
+| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#3 default single Worker） |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
@@ -360,6 +360,31 @@ Planner 均为 0；崩溃后新 `ClosedLoop` 注入相同历史 error 也可 gat
 `python -m compileall -q src panel run_mission.py` 与 `git diff --check` 均退出 0；
 本轮按要求未运行真实 GUI E2E。
 
+### Default single Worker
+
+新 Mission 的 `MissionSpec` 缺省与 Panel 默认均已改为 `max_subtasks=1`；Panel
+只接受 1 或 2，对 0、负数和大于 2 的值返回明确错误，不再用 truthy fallback
+静默 clamp。首次分解时，1 由 `MissionController` 确定性生成唯一
+`<mission-id>-S1` 标准 MissionPlan，完整继承 objective、allowed paths、验收条件
+和 Gate；TaskSpec materialization 继续继承 forbidden paths、user instruction、
+budgets、worker harness 和 `subtask_of`。该路径的 decomposition Planner 调用为 0。
+
+只有 `max_subtasks=2` 才调用 `Planner.plan_decompose()`。Planner prompt 与本地
+validator 现允许返回 1 或 2，默认优先 1；只有路径、验收和依赖可自然独立且存在
+真实并行收益时才使用第二 Worker。返回超过 2 个 task 会被 validator 拒绝。新
+Mission 的其它上限在首次分解时也明确转 HUMAN，不静默降级。配置中的
+`roles.max_parallel_workers=2` 当前没有运行时 consumer，保留为能力上限。
+
+恢复仍先从 StateStore hydrate 已持久化的标准 MissionPlan；2-task 与历史 3-task
+计划均不会应用新建上限或重新 decomposition。新增 `tasks/e2e-smoke.json` 作为今后
+标准 GUI E2E 的固定输入，本 PR 不自动执行真实 AO Worker/GUI E2E，并保留原
+`tasks/mission-quick.json` 不改。直接相关回归为 `58 passed in 24.47s`。完整离线
+基线首次为 `375 passed in 142.67s`；因显著慢于近期基线，按要求单独补跑
+`--durations=20`，结果为 `375 passed in 129.48s`。最慢项仍集中在 fake Mission、
+worktree 与 Verifier 类测试；本次新增的 single-lane fake Mission 为 `9.37s`，未
+顺手优化测试性能。`python -m compileall -q src panel run_mission.py`、
+`git diff --check`、fixture 契约检查与 6 份指定文档的本地链接检查均退出 0。
+
 ## 十、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
@@ -368,7 +393,7 @@ Planner 均为 0；崩溃后新 `ClosedLoop` 注入相同历史 error 也可 gat
 | K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
 | K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 已确认：主路径与兼容/历史模块同时存在 |
 | K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
-| K5 | 默认强制拆成至少两个 Worker | R3 | 已确认：面板和示例默认 `max_subtasks=2`，Planner 提示要求 `2..max` |
+| K5 | 默认强制拆成至少两个 Worker | R3 | 已解决：新 Mission 默认 1；值为 1 时确定性单 lane 且不调用 decomposition Planner；显式选择 2 时 Planner 可返回 1 或 2 |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
 | K7 | issue fingerprint 包含 source | R3 | 已确认：`issue_fingerprint()` 返回值显式包含 `source` |
 | K8 | thread 缺少 revision 裁决语义 | R3 | 已确认：同一 issue 只允许一次 verdict，没有 revision 字段或重裁决路径 |
@@ -410,7 +435,8 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 
 完整 E2E 后优先做 Competition behavior convergence：
 
-- Worker 默认 1，最多 2；
+- Worker 默认 1、按需最多 2 已完成；新 Mission 单 lane 不调用 decomposition
+  Planner，历史多 task plan 仍可恢复；
 - Verifier final-only 默认路径已完成：新普通 Task 不调用，历史
   `VERIFIER_PENDING` 可恢复，Mission 终局调用保留；高风险时的显式按需策略未新增；
 - gate-first happy path 已完成离线实现：证据充分的首次普通 Task 直接运行
@@ -444,9 +470,9 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 
 当前顺序固定为：Competition behavior convergence → 重复模块清理 → clean
 delivery/installer/first-run。R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；
-Verifier final-only 的同题性能 E2E 已完成；gate-first happy path 是当前 Competition
-convergence #2，合并后才运行一次同题性能 E2E。本轮不运行真实 AO Worker/GUI
-E2E，也不启动 R2 删除。
+Verifier final-only、gate-first、event freshness 与默认单 Worker 已完成离线实现。
+本 PR 审计合并后可用 `tasks/e2e-smoke.json` 运行一次标准 GUI E2E。本轮不运行
+真实 AO Worker/GUI E2E，也不启动 R2 删除。
 
 ## 十二、停止条件
 

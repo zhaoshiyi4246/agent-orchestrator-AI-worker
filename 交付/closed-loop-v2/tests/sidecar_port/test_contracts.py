@@ -1,10 +1,23 @@
 """Phase 1 tests: TaskSpec / AuditResult / PlannerAction validation + state machine."""
 from loopcore.mission_contracts import (
-    TaskSpec, AuditResult, PlannerAction, AuditEvidence,
+    TaskSpec, MissionSpec, AuditResult, PlannerAction, AuditEvidence,
     AuditDecision, PlannerActionType, ProjectState,
     is_legal_transition, validate_task_spec, validate_audit_result,
     validate_planner_action,
 )
+
+
+def test_mission_spec_defaults_to_one_subtask():
+    mission = MissionSpec.from_dict({
+        "mission_id": "M-DEFAULT",
+        "project_id": "closed-loop-demo",
+        "objective": "change app.py",
+        "allowed_paths": ["app.py"],
+        "forbidden_paths": [".git/**"],
+        "acceptance_criteria": [],
+        "gate_commands": [],
+    })
+    assert mission.budgets["max_subtasks"] == 1
 
 
 def _task_spec():
