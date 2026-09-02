@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；`MISSION-PANEL-20260901-214216` 首次完整 GUI happy path 已以 `final gate pass + verifier PASS` 到达 `MISSION_DONE`；当前进入 Competition behavior convergence #1，将 Verifier 收敛为 Mission final-only
+- 状态：R1 与 R2-0 主链已完成；PR #11 final-only 后的真实性能 E2E `MISSION-PANEL-20260902-000139` 已以 `final gate pass + verifier PASS` 到达 `MISSION_DONE`，总耗时 `646.116s`；当前进行 Competition behavior convergence #2，为证据充分的首次普通 Task completion 增加 deterministic gate-first
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -165,23 +165,33 @@ PlannerAction 的 transport schema 已显式覆盖 REPLAN 所需的非空
 `replacement_task_spec.objective`；共享 runner 不再把未声明 `properties` 的
 object schema 静默收窄为空对象，而是在启动 Codex 前 fail closed。
 
-新 Task 的确定性 Gate PASS 现在从 `GATE_PENDING` 直接进入 `DONE`，不调用
-Task Verifier，也不写 task-level verification row。`VERIFIER_PENDING` 状态、
-VerifierProvider/VerifierResult 与完整 task verifier 路径仍保留：历史 runtime 若已
-持久化在 `VERIFIER_PENDING`，`ClosedLoop.step()` 会继续调用 Verifier，并按原有
-PASS/FAIL、provider retry、budget 与 crash-resume 语义完成恢复。Mission-level
-Final Gate 与 Mission Verifier 完全保留；final gate PASS + verifier PASS 仍得到
-`MISSION_DONE` 并写入 mission-level verification row。当前 Mission 仍允许多个
-子任务；默认 1 个 Worker、必要时最多 2 个是后续 R3 目标。
+首次普通 Task completion 在确定性证据充分时采用 gate-first：当前状态必须为
+`WORKER_RUNNING`；Worker 明确处于 idle/waiting_input/needs_input/exited/terminated；
+没有 pending approval、本 tick actionable Observer alert 或需要 L0 nudge 的 fresh
+error；Task 至少有一个非空 Gate 命令；AO workspace 可解析；Git
+`changed_paths` 可审计且至少包含一个 non-artifact change。满足时执行
+`WORKER_RUNNING → GATE_PENDING → _run_gate()`：Gate PASS 直接 `DONE`，不调用
+Completion Auditor、completion Planner 或 Task Verifier。Gate FAIL 仍进入
+`AUDIT_PENDING → Auditor → Planner`。空 Gate、`changed_paths == []`、
+`changed_paths == None`、workspace/base 不可审计或其他任一条件不足时，继续原有
+Completion Auditor → Planner 路径；`WORKER_RETRYING` completion 不使用 fast path。
+
+`VERIFIER_PENDING` 状态、VerifierProvider/VerifierResult 与完整 task verifier 路径
+仍保留：历史 runtime 若已持久化在 `VERIFIER_PENDING`，`ClosedLoop.step()` 会继续
+调用 Verifier，并按原有 PASS/FAIL、provider retry、budget 与 crash-resume 语义完成
+恢复。Mission-level Final Gate 与 Mission Verifier 完全保留；final gate PASS +
+verifier PASS 仍得到 `MISSION_DONE` 并写入 mission-level verification row。当前
+Mission 仍允许多个子任务；默认 1 个 Worker、必要时最多 2 个是后续 R3 目标。
 
 Observer alert 是持久化运行事实，不等于立即执行语义干预。当前 `ClosedLoop`
 对 `REPEATED_ERROR` 增加了一条严格时序边界：若 AO 明确报告
 `activity.state=active`，alert 仍写入 StateStore，但不调用 `_handle_alerts`、
 Auditor、Planner、Gate capture 或 Worker 消息，Task 保持 `WORKER_RUNNING`。
-Worker 后续进入 idle/waiting/exited/terminated 后，仍复用现有 approval、
-quiet-completion/completion-audit 路径，以届时最新 workspace、diff 与 Gate 证据
-裁决；不新增 deferred queue、状态或数据表。非 active 的 `REPEATED_ERROR` 与
-`NO_PROGRESS` 行为不在本次改变范围。
+Worker 后续进入 idle/waiting_input/needs_input/exited/terminated 后，仍先复用
+现有 approval 与 alert/L0 时序；只有确定性 Gate 证据充分才走上述 gate-first，
+否则继续 quiet-completion/completion-audit，以届时最新 workspace、diff 与 Gate
+证据裁决；不新增 deferred queue、状态或数据表。非 active 的 `REPEATED_ERROR` 与
+`NO_PROGRESS` 行为不变。
 
 `ClosedLoop` 还保留一条 deterministic L0 fast path：fresh local error 在
 任务仍为 `WORKER_RUNNING`、Worker 不处于进行中的 turn、孵化 grace 已满足且
@@ -513,9 +523,11 @@ UI → 绕过 MissionController 改状态
    CLI，其中一套进入主路径，另一套主要是兼容或历史来源。
 3. 默认 Mission 的 `max_subtasks=2`，Planner 提示在该值大于 1 时要求拆成
    `2..max_subtasks`，因此当前默认不是单 Worker。
-4. Verifier 调用频率已完成第一步收敛：新 Task Gate PASS 直接 DONE，不再默认
-   调用 Task Verifier；历史 `VERIFIER_PENDING` 可恢复，Mission 终局 Gate +
-   Verifier 保持不变。高风险子任务的显式按需策略尚未新增。
+4. 普通 Task 调用频率已完成两步收敛：新 Task Gate PASS 直接 DONE，不再默认
+   调用 Task Verifier；证据充分的首次普通 completion 先运行 deterministic Task
+   Gate，不调用 Completion Auditor 或 completion Planner。证据不足、Gate FAIL、
+   alert/retry/恢复仍保留 Auditor → Planner；历史 `VERIFIER_PENDING` 可恢复，
+   Mission 终局 Gate + Verifier 保持不变。高风险子任务的显式按需策略尚未新增。
 5. `issue_fingerprint()` 把 `source` 写入 key；`LoopBus.resolve_issue()` 只允许
    每个 issue 一次 verdict，没有 revision 语义。
 6. Store/AO/投影的代码主从关系已确认；R1-4 已同步 README、交付说明、
@@ -535,16 +547,17 @@ UI → 绕过 MissionController 改状态
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
 - R2：R2-0 先修复 AO 主运行路径可移植性；重复模块、旧入口和参考代码清理延后
   到比赛行为收敛之后；
-- R3：Competition behavior convergence 已启动；Verifier final-only 默认路径已完成，
-  后续收敛默认 Worker 1/最多 2、`auto_ff_master` 实验性高风险边界；
+- R3：Competition behavior convergence 已启动；Verifier final-only 与 gate-first
+  happy path 已完成离线实现，后续收敛默认 Worker 1/最多 2、`auto_ff_master`
+  实验性高风险边界；
   fingerprint/thread revision 保持低优先级；
 - R4：收敛配置、项目选择和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。
 
 当前执行优先级为：Competition behavior convergence → 重复模块清理 → clean
-delivery/installer/first-run。Verifier final-only PR 合并后先运行一次同题性能
-GUI E2E；Completion Auditor / Planner 的进一步优化属于下一项独立任务，不在
-本次同时改变控制语义，也不立即开始 R2-1。
+delivery/installer/first-run。gate-first happy path PR 审计合并后先运行一次同题性能
+GUI E2E；本轮不改变异常 Auditor/Planner、retry、alert/L0 或 Mission final 语义，
+也不立即开始 R2-1。
 
 ## 十、明确非目标
 

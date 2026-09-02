@@ -52,9 +52,16 @@ tests/
 
 - 当前系统允许一个 Mission 拆分为多个子任务；默认单 Worker、按需第二 Worker
   是 R3 目标。
-- 当前 Task happy path：`Worker → Completion Auditor → Planner → deterministic
-  Task Gate → DONE`。新 Task Gate PASS 不调用 Task Verifier，也不写 task-level
-  verification row。
+- 证据充分的首次普通 Task completion：`Worker idle → deterministic Task Gate →
+  DONE`。资格要求为 `WORKER_RUNNING`、明确
+  idle/waiting_input/needs_input/exited/terminated、无 pending
+  approval、无本 tick actionable alert 或待处理 L0 fresh error、至少一个非空
+  Gate 命令、AO workspace 可解析，且 Git `changed_paths` 可审计并至少有一个
+  non-artifact change。新 Task Gate PASS 不调用 Completion Auditor、completion
+  Planner 或 Task Verifier，也不写 task-level verification row。
+- 空 Gate、无变更、Git change set 未知、workspace 不可解析等证据不足情况继续走
+  Completion Auditor → Planner；Gate FAIL 继续走 `GATE_PENDING → AUDIT_PENDING
+  → Auditor → Planner`。不是所有 Task 都绕过 Completion Auditor。
 - 历史 runtime 若已处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
 - 当前 Mission final path：`materialization → integration → Final Gate → Mission
   Verifier → MISSION_DONE / HUMAN`。Mission Verifier 是新 Mission 默认唯一的

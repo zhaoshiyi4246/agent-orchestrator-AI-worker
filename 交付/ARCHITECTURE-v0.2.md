@@ -86,18 +86,24 @@ Panel Mission payload、`MissionSpec`、`TaskSpec`、当前
 `max_subtasks=2`。默认 1 个 Worker、只有任务确实独立时才启用第 2 个，是
 R3 目标，不是当前实现不变量。
 
-当前真实 Task happy path 仍保留 Completion Auditor + Planner：
+证据充分的首次普通 Task completion 采用 deterministic gate-first：
 
 ```text
-Worker
-→ Completion Auditor
-→ Planner
+Worker idle
 → deterministic Task Gate
 → DONE
 ```
 
-新 Task Gate PASS 不调用 Task Verifier，也不写 task-level verification row。
-历史 runtime 若已经处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
+该 fast path 只允许当前状态为 `WORKER_RUNNING`、Worker 明确处于
+idle/waiting_input/needs_input/exited/terminated、没有 pending approval、本 tick
+没有 actionable Observer alert 或需要 L0 nudge 的 fresh error，并且至少存在一个
+非空 Gate 命令、AO workspace 可解析、Git `changed_paths` 可审计且至少包含一个
+non-artifact change。空 Gate、`changed_paths == []`、`changed_paths == None` 或
+workspace 不可解析都继续走 Completion Auditor → Planner。Gate FAIL 继续走
+`GATE_PENDING → AUDIT_PENDING → Auditor → Planner`；`WORKER_RETRYING` idle 也
+保持 Completion Audit。新 Task Gate PASS 不调用 Completion Auditor、completion
+Planner 或 Task Verifier，也不写 task-level verification row。历史 runtime 若已经
+处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
 
 当前 Mission final path 是：
 
@@ -226,7 +232,7 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 - Planner 自动分解；
 - AO Codex Worker 执行；
 - Observer 确定性观察；
-- Auditor → Planner 闭环；
+- 证据不足或异常时的 Auditor → Planner 闭环；
 - Integration Gate；
 - deterministic Task Gate、Mission Final Gate 与 Mission Verifier；
 - 历史 `VERIFIER_PENDING` task verifier 恢复；
@@ -240,8 +246,8 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 
 - R2：生成主路径引用图，逐组证明并收敛重复 AO Client、Observer、Gate、
   协议和旧 CLI；在此之前不删除参考目录或兼容模块。
-- R3：Verifier final-only 已完成，待一次同题真实性能 E2E；下一项进行
-  Completion Auditor / Planner happy-path convergence；默认 1 个 Worker、必要时
+- R3：Verifier final-only 与 gate-first happy path 已完成离线实现；当前 PR 合并后
+  待一次同题真实性能 E2E；默认 1 个 Worker、必要时
   最多 2 个、issue fingerprint 和 thread revision 仍待后续；决定保留当前有界
   L0 fast path，还是将自动 Worker 指令统一由 Planner 发出。
 - R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
