@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -122,3 +123,103 @@ def test_panel_frontend_defaults_to_bounded_single_worker():
             in html)
     assert 'max_subtasks:Number($("f_sub").value)' in html
     assert 'max_subtasks:+$("f_sub").value||2' not in html
+
+
+def test_panel_frontend_does_not_expose_auto_master_writeback():
+    html = INDEX.read_text(encoding="utf-8")
+    assert "k_ff" not in html
+    assert "auto_ff_master" not in html
+    assert "DONE 后自动合并 master" not in html
+    assert "auto_ff" not in html
+
+
+def test_panel_snapshot_config_has_only_live_time_parameters(
+        monkeypatch, tmp_path):
+    panel = panel_server.PanelState()
+    monkeypatch.setattr(panel_server, "PANEL", panel)
+    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
+
+    config = panel_server.snapshot()["config"]
+
+    assert config == panel.live
+    assert "auto_ff_master" not in config
+
+
+def test_panel_config_rejects_auto_master_writeback_true():
+    panel = panel_server.PanelState()
+
+    with pytest.raises(
+            RuntimeError,
+            match="auto_ff_master is disabled in the competition runtime"):
+        panel.set_config({"auto_ff_master": True})
+
+
+def test_panel_config_ignores_legacy_false_and_applies_time_parameters():
+    panel = panel_server.PanelState()
+
+    config = panel.set_config({
+        "auto_ff_master": False,
+        "poll_seconds": 9,
+        "idle_audit_cooldown_seconds": 17,
+    })
+
+    assert config["poll_seconds"] == 9
+    assert config["idle_audit_cooldown_seconds"] == 17
+    assert "auto_ff_master" not in config
+
+
+def test_panel_mission_done_has_no_scm_writeback(monkeypatch):
+    panel = panel_server.PanelState()
+    controller = SimpleNamespace(state="MISSION_DONE", step=MagicMock())
+    projector = SimpleNamespace(project_once=MagicMock())
+    panel.rt = SimpleNamespace(
+        controller=controller,
+        projector=projector,
+        mission=SimpleNamespace(
+            mission_id="M-COMPETITION-DONE", project_id="project"),
+    )
+
+    def forbidden_subprocess(*_args, **_kwargs):
+        raise AssertionError("MISSION_DONE attempted an SCM subprocess")
+
+    monkeypatch.setattr("subprocess.run", forbidden_subprocess)
+    panel._run()
+
+    controller.step.assert_called_once_with()
+    assert projector.project_once.call_count == 2
+    assert panel.last_summary == {
+        "mission_id": "M-COMPETITION-DONE",
+        "final_state": "MISSION_DONE",
+        "stopped_by_user": False,
+    }
+    assert panel.errors == []
+
+
+def test_panel_runtime_contains_no_auto_ff_or_git_subprocess():
+    tree = ast.parse(SERVER.read_text(encoding="utf-8"))
+
+    assert not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "ff_master_to_integration"
+        for node in ast.walk(tree)
+    )
+    assert not any(
+        isinstance(node, ast.Import)
+        and any(alias.name == "subprocess" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    assert not any(
+        isinstance(node, ast.ImportFrom) and node.module == "subprocess"
+        for node in ast.walk(tree)
+    )
+    assert not any(
+        {"git", operation}.issubset({
+            child.value
+            for child in ast.walk(node)
+            if isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+        })
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for operation in ("push", "merge")
+    )

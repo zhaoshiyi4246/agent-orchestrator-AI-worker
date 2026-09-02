@@ -73,6 +73,12 @@ Auditor、completion Planner 或 Task Verifier，也不写 task-level verificati
 历史 runtime 若已处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。Mission
 Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。
 
+`MISSION_DONE` 表示 verified integration 已通过 Final Gate 与 Mission Verifier，
+结果保留在 `runtime/<mission-id>/integration`。Competition runtime 不会自动修改
+用户 `master`/`main`，也不会 push `origin`。如果未来需要交付到主分支，应设计为
+用户显式 SCM 操作，而不是 Mission DONE 的隐式副作用；当前没有宣称已实现手动
+SCM 按钮。
+
 ## 目录结构
 
 ```text
@@ -133,15 +139,16 @@ bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完�
 
 - Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
 - gate-first happy path 与 event-freshness 修复已完成；
-- 默认 1 个 Worker、按需最多 2 个已完成；本 PR 审计合并后可用固定
-  `tasks/e2e-smoke.json` 运行一次标准 GUI E2E；
-- 隐藏或显式标记 `auto_ff_master` 为实验性高风险功能仍待后续；
+- 默认 1 个 Worker、按需最多 2 个已完成；标准 smoke
+  `MISSION-E2E-SMOKE-20260902-204459` 已到达 `MISSION_DONE`；
+- Competition runtime 的自动 master/main merge 与 origin push 已移除；
 - 比赛行为收敛后再做重复模块和旧入口清理；
 - 最后完成 clean delivery、installer/bootstrap、AO first-run 和 CI 收尾；
 - fingerprint/source 与 thread revision 继续保持低优先级。
 
-Project 注册/选择与其他首次配置 UX 归比赛 UX/R4，`auto_ff_master` 的 legacy
-data root 和权限边界归 Competition convergence/R4，clean clone 安装归最终
+Project 注册/选择与其他首次配置 UX 归比赛 UX/R4；若未来需要主分支交付，用户
+显式 SCM 操作也应作为独立设计处理。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产
+消费者；遗留 `AO_DATA_DIR` 兼容模块仍归 R2 引用审计。clean clone 安装归最终
 clean-delivery 阶段。
 
 ## 本地验证

@@ -90,7 +90,11 @@ materialization
 ```
 
 Mission Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。VerifierProvider
-仍是正式角色；高风险子任务的显式按需策略尚未实现。
+仍是正式角色；高风险子任务的显式按需策略尚未实现。`MISSION_DONE` 表示
+verified integration 已通过 Final Gate 与 Mission Verifier；结果保留在
+`runtime/<mission-id>/integration`。Competition runtime 不会因此修改用户仓库的
+`master`/`main`，也不会 push `origin`。若未来需要把结果交付到主分支，应设计为
+用户显式发起的 SCM 操作，不是 Mission 完成的隐式副作用。
 
 ## 当前已经实现
 
@@ -114,6 +118,9 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
   `~/.ao/running.json`；
 - 正常 Mission 启动和恢复找不到 AO executable 时会立即报错；只读查看已有
   Mission 存档不要求 AO executable，也不会连接 AO、调用 Codex 或创建 Worker。
+- `CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；旧自动 master 写回 helper
+  已删除，不会迁移到当前 integration 路径。遗留 `AO_DATA_DIR` 兼容模块仍留待
+  R2 按引用关系清理。
 
 这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。clean clone 的
 首次 bootstrap/安装脚本、AO 首次配置体验以及 Project 注册/选择尚未完成；当前
@@ -123,9 +130,9 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 
 1. Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
 2. gate-first happy path 与 event-freshness 修复已完成；
-3. 新 Mission 默认 1 个 Worker、按需最多 2 个已完成；下一次审计合并后可使用
-   `tasks/e2e-smoke.json` 做一次标准 GUI E2E；
-4. 隐藏或明确标记 `auto_ff_master` 为实验性高风险功能仍待后续；
+3. 新 Mission 默认 1 个 Worker、按需最多 2 个已完成；标准 smoke
+   `MISSION-E2E-SMOKE-20260902-204459` 已到达 `MISSION_DONE`；
+4. Competition runtime 的自动 master/main merge 与 origin push 已移除；
 5. 再生成主路径引用图并清理重复模块和旧入口；
 6. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
 
@@ -182,7 +189,8 @@ Project。`tasks/e2e-smoke.json` 是固定回归输入，不会被自动执行�
 
 ## 安全边界
 
-- 自动 push、自动合并和破坏性审批默认关闭；
+- Mission 完成不会自动 merge/push 或修改用户 `master`/`main`；自动 push 不属于
+  competition runtime；
 - Planner/Auditor/Verifier 使用只读、ephemeral、结构化输出的 Codex CLI 调用；
 - Observer 和 Gate 不使用模型；
 - Markdown、JSONL、前端缓存和拓扑图不作为运行状态源；

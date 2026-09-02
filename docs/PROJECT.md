@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；Verifier final-only、gate-first、event freshness 已完成；当前进行 Competition behavior convergence #3 的默认单 Worker 收敛
+- 状态：R1 与 R2-0 主链已完成；Competition behavior convergence #4 已移除正常运行路径的自动 master/main 写回与 origin push
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -198,6 +198,10 @@ activity cursor 只是同一进程的路由边界；`fresh_errors` 还必须通�
 调用 Verifier，并按原有 PASS/FAIL、provider retry、budget 与 crash-resume 语义完成
 恢复。Mission-level Final Gate 与 Mission Verifier 完全保留；final gate PASS +
 verifier PASS 仍得到 `MISSION_DONE` 并写入 mission-level verification row。
+`MISSION_DONE` 表示 verified integration 已通过 Final Gate 与 Mission Verifier，
+结果保留在 `runtime/<mission-id>/integration`；它不修改用户 `master`/`main`，
+也不 push `origin`。未来若需要将结果交付到主分支，应设计为用户显式 SCM 操作，
+不是 Mission DONE 的隐式副作用。
 
 新 Mission 的 `max_subtasks` 默认值为 1，Panel 只接受 1 或 2 并明确拒绝其它值。
 首次分解时，值为 1 由 `MissionController` 确定性生成唯一
@@ -295,9 +299,10 @@ AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
   生产组装不传入或注入开发者专属 `AO_DATA_DIR`；
 - integration worktree：CL-AO runtime 下的 `runtime/<mission-id>/integration`，
   不属于 AO managed worktree root；
-- 默认关闭的 `auto_ff_master` 仍属 R4 高风险边界；只有显式设置
-  `CLAO_AO_DATA_DIR` 才允许其解析 legacy integration worktree，否则明确拒绝；
-- `llm_env.py`、旧 AO Client/CLI 和依赖 `AO_DATA_DIR` 的测试夹具仍是 R2/R4
+- competition Panel 已删除 `auto_ff_master` 状态、UI、完成分支和旧
+  `ff_master_to_integration()` helper；旧客户端发送 legacy `false` 可忽略，发送
+  `true` 会明确拒绝。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；
+- `llm_env.py`、旧 AO Client/CLI 和依赖 `AO_DATA_DIR` 的测试夹具仍是 R2
   待审计兼容或历史边界，本轮未删除或改写。
 
 PR #6 的 live probe 曾从默认 runfile 解析到 daemon endpoint，`get_projects()`
@@ -315,7 +320,8 @@ K18 的主生产路径已经移除 AO executable、runfile 的开发机绝对路
 - clean clone bootstrap/安装脚本：归最终 clean-delivery 阶段；
 - AO 首次配置 UX：归比赛 UX 与 clean-delivery 阶段；
 - Project 注册/选择：归比赛 UX/R4；
-- `auto_ff_master` legacy data root：归 Competition convergence/R4。
+- 旧 AO Client/CLI 和 `AO_DATA_DIR` 兼容模块：归 R2 引用审计；不得因为
+  `CLAO_AO_DATA_DIR` 已无消费者而顺手删除所有 legacy 模块。
 
 ## 四、后续收敛目标架构
 
@@ -564,8 +570,8 @@ UI → 绕过 MissionController 改状态
    消费，面板还维护另一组运行时参数；AO 连接直接相关的 `ao.base_url` 与
    `ao.request_timeout_seconds` 已在 R2-0 接入共享 `build_runtime()`。
 8. 面板默认且回退到 `closed-loop-demo`，没有从 AO 项目列表选择真实 Project。
-9. 自动审批存在；`auto_ff_master` 默认关闭，但面板 API 可开启自动快进和 push，
-   两者都需要在 R4 单独审计权限边界。
+9. 自动审批仍存在并待 R4 审计；Panel 的 `auto_ff_master` 已移除，competition
+   runtime 不会在 Mission DONE 后自动修改 master/main 或 push origin。
 10. 旧文档曾分别声称 247 或 272 项测试；这些冻结数字已清理。R1-3 的
     `main` 基线为 295 passed，以后以 CI/当前测试输出为准。
 
@@ -576,16 +582,17 @@ UI → 绕过 MissionController 改状态
 - R2：R2-0 先修复 AO 主运行路径可移植性；重复模块、旧入口和参考代码清理延后
   到比赛行为收敛之后；
 - R3：Competition behavior convergence 已启动；Verifier final-only、gate-first、
-  event freshness 与默认 Worker 1/按需最多 2 已完成离线实现；后续收敛
-  `auto_ff_master` 实验性高风险边界；
+  event freshness 与默认 Worker 1/按需最多 2 已完成，标准 smoke
+  `MISSION-E2E-SMOKE-20260902-204459` 已通过；自动 master/main merge 与 origin
+  push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
 - R4：收敛配置、项目选择和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。
 
 当前执行优先级为：Competition behavior convergence → 重复模块清理 → clean
-delivery/installer/first-run。默认单 Worker PR 审计合并后可使用固定
-`tasks/e2e-smoke.json` 运行一次标准 GUI E2E；本轮不改变异常 Auditor/Planner、
-retry、alert/L0 或 Mission final 语义，也不立即开始 R2-1。
+delivery/installer/first-run。核心 single-worker 标准 smoke 已通过，本安全边界/UI
+任务不再运行真实 AO Worker/E2E；本轮不改变异常 Auditor/Planner、retry、alert/L0
+或 Mission final 验证语义，也不立即开始 R2-1。
 
 ## 十、明确非目标
 

@@ -263,14 +263,6 @@ def test_read_only_attach_skips_ao_but_normal_start_fails_fast(
         normal_panel.start_mission(mission)
 
 
-def test_auto_ff_requires_explicit_legacy_data_root(monkeypatch):
-    from panel import server
-
-    monkeypatch.delenv("CLAO_AO_DATA_DIR", raising=False)
-    with pytest.raises(RuntimeError, match="CLAO_AO_DATA_DIR"):
-        server.ff_master_to_integration("M-PORTABLE", "project")
-
-
 def test_portability_code_does_not_scan_registry_or_install_ao():
     tree = ast.parse(Path(run_mission.__file__).read_text(encoding="utf-8"))
     imported = {
