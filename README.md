@@ -174,6 +174,9 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 `max_subtasks=1` 时直接输出确定性单任务计划且不调用模型，值为 2 时才调用一次
 只读、ephemeral 的 Codex Planner。真实 Mission 运行需要 AO daemon 和已注册
 Project。`tasks/e2e-smoke.json` 是固定回归输入，不会被自动执行。
+它当前仅是标准 smoke fixture/template；直接通过 CLI 重复执行前必须使用新的唯一
+`mission_id`，Panel 后续若增加“标准 Smoke”入口，应自动生成唯一 Mission ID，
+不得删除旧 `runtime` 来伪装成新 Mission。
 
 测试数量以 CI 或当前真实命令输出为准，不在用户文档中冻结。
 

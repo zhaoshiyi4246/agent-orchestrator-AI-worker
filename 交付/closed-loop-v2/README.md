@@ -49,6 +49,10 @@ tasks/e2e-smoke.json       固定标准 E2E 输入（不自动执行）
 tests/
 ```
 
+`tasks/e2e-smoke.json` 当前仅是标准 smoke fixture/template；直接通过 CLI 重复执行前
+必须使用新的唯一 `mission_id`，Panel 后续若增加“标准 Smoke”入口，应自动生成唯一
+Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
+
 ## 当前边界
 
 - 新 Mission 默认 `max_subtasks=1`：Controller 确定性生成唯一 S1，不调用
