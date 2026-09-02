@@ -194,10 +194,7 @@ tests/**</textarea>
         <div><label>审批卡死升级</label><input id="k_block" type="number" min="1"></div>
         <div><label>L0 宽限</label><input id="k_grace" type="number" min="1"></div>
       </div>
-      <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <label title="AO 的 worker 基线取自 origin/master，因此自动合并会同时推 origin" style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:12px">
-          <input id="k_ff" type="checkbox" style="width:auto;margin:0">DONE 后自动合并 master（含推 origin）
-        </label>
+      <div style="margin-top:8px;text-align:right">
         <button id="btnCfg">应用</button>
       </div>
     </div>
@@ -277,7 +274,6 @@ function render(s){
   if(document.activeElement!==$("k_idle")) $("k_idle").value = s.config.idle_audit_cooldown_seconds;
   if(document.activeElement!==$("k_block")) $("k_block").value = s.config.blocked_escalation_seconds;
   if(document.activeElement!==$("k_grace")) $("k_grace").value = s.config.l0_nudge_grace_seconds;
-  $("k_ff").checked = !!s.config.auto_ff_master;
 
   // missions list
   const ml = $("missionsList");
@@ -347,12 +343,6 @@ function render(s){
   if(g) ev += `<div>Gate <code>${esc(g.command||"")}</code> exit=${g.exit_code}
     <span style="color:${g.exit_code===0?"var(--green)":"var(--red)"}">${g.exit_code===0?"✔":"✘"}</span></div>`;
   if(v) ev += `<div>Verifier <b class="verdict-${esc(v.verdict)}">${esc(v.verdict)}</b> — ${esc((v.summary||"").slice(0,140))}</div>`;
-  const ls = s.last_summary;
-  if(ls && ls.auto_ff){
-    ev += ls.auto_ff.error
-      ? `<div>自动合并 master：<span style="color:var(--red)">失败 — ${esc(ls.auto_ff.error)}</span></div>`
-      : `<div>自动合并 master：<span style="color:var(--green)">✔ ${esc(ls.auto_ff.note||ls.auto_ff.master||"")}</span></div>`;
-  }
   $("evidence").innerHTML = ev || "—";
 
   // events tab
@@ -381,8 +371,7 @@ $("btnCfg").onclick = ()=> fetch("/api/config",{method:"POST",
   body:JSON.stringify({poll_seconds:+$("k_poll").value,
     idle_audit_cooldown_seconds:+$("k_idle").value,
     blocked_escalation_seconds:+$("k_block").value,
-    l0_nudge_grace_seconds:+$("k_grace").value,
-    auto_ff_master:$("k_ff").checked})})
+    l0_nudge_grace_seconds:+$("k_grace").value})})
   .then(()=>toast("时间参数已实时生效"));
 $("btnStart").onclick = ()=>{
   const body = {objective:$("f_obj").value, acceptance_criteria:$("f_ac").value,

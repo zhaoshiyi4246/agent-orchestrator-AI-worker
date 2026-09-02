@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R3 Competition behavior convergence
-- 当前任务：Competition behavior convergence #3 — default single Worker
-- 当前状态：新 Mission 默认 1 Worker、按需最多 2 已完成；定向回归、完整离线基线、语法与文档检查均通过
-- 下一步：创建本任务 PR；审计合并后可用固定 `tasks/e2e-smoke.json` 运行一次标准 GUI E2E，不直接进入 R2-1
+- 当前任务：Competition behavior convergence #4 — disable automatic master push
+- 当前状态：正常 Panel runtime 的自动 master/main merge 与 origin push 已移除；定向、完整离线、语法、diff 与文档检查均通过
+- 下一步：创建本任务 PR；本安全边界/UI PR 不运行真实 AO Worker/E2E，审计合并后再进入重复模块清理
 
 ## 一、更新规则
 
@@ -31,7 +31,7 @@
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
-| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#3 default single Worker） |
+| R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 进行中（#4 disable automatic master push） |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
@@ -181,7 +181,7 @@ E2E preflight 证明 `run_mission.py` 的 AO executable、data root 和 runfile 
 | Worker workspace | `AOAdapter.get_session_workspace()` 调用官方 loopback `/api/v1/desktop/sessions/{sessionId}/workspace`；缺失/空路径和 AO 404 均 fail closed，不复制 Git/Scratch layout |
 | dispatch / merge | spawn 后立即解析真实 workspace 并冻结 base；merge 在 kill 前解析路径，随后 commit、创建/复用 integration、merge，不再拼 AO data root |
 | integration ownership | 固定在 StateStore 同目录的 `runtime/<mission-id>/integration`；已存在有效 Git worktree 可由 final verify 直接复用，不依赖终止 Worker Session |
-| `auto_ff_master` | 默认仍关闭且 Git/push 行为未重构；仅显式 `CLAO_AO_DATA_DIR` 可启用 legacy worktree 推导，未设置时明确拒绝，继续归 R4 审计 |
+| `auto_ff_master` | R2-0 当时仍默认关闭且未重构；该历史边界已由 R3 #4 删除，见后文当前证据 |
 | 直接回归 | AO portability、runtime 组装、Panel/CLI 共享路径及既有 Worker spawn/model 回归：`42 passed` |
 | PR #6 合并审计回归 | 无 AO executable 时只读 attach 可加载已有 StateStore；正常 start 仍 fail fast；相关回归 `30 passed in 0.19s` |
 | 完整离线测试 | `pytest tests -q`：`308 passed in 32.18s`，退出码 0 |
@@ -196,7 +196,7 @@ R2-0 准确结论：K18 的主生产运行路径已解决；AO executable、runf
 workspace 均已移除开发者绝对路径或内部目录推导绑定。这不等于 K18 所涉及的
 全部用户交付可移植性已经完成。clean clone bootstrap/安装脚本
 归 clean-delivery，AO 首次配置 UX 归比赛 UX/clean-delivery，Project 注册/选择归
-比赛 UX/R4，`auto_ff_master` legacy data root 归 Competition convergence/R4。
+比赛 UX/R4；R2-0 当时保留的 `auto_ff_master` legacy data root 后由 R3 #4 删除。
 当前下一步是 demo bootstrap + GUI E2E，随后优先做比赛行为收敛，不直接开始 R2-1。
 
 ### 第一次真实 GUI E2E 与语义角色恢复
@@ -385,6 +385,34 @@ worktree 与 Verifier 类测试；本次新增的 single-lane fake Mission 为 `
 顺手优化测试性能。`python -m compileall -q src panel run_mission.py`、
 `git diff --check`、fixture 契约检查与 6 份指定文档的本地链接检查均退出 0。
 
+审计合并后的标准 smoke `MISSION-E2E-SMOKE-20260902-204459` 真实到达
+`MISSION_DONE`：确定性单任务计划，decomposition Planner、Completion Auditor、
+completion Planner 与 Task Verifier 调用均为 0，Worker 为 1，Mission Verifier 为
+1；demo master 保持不变，总耗时约 `409.5s`。因此核心 single-worker happy path
+停止继续优化，后续回到比赛产品安全边界主线。
+
+### Disable automatic master push
+
+Competition Panel 已直接删除普通 UI 中的自动写回 checkbox、tooltip、snapshot
+同步与 config POST 字段；HTML 不再包含 `k_ff`、`auto_ff_master` 或“DONE 后自动
+合并 master”。PanelState 不再保存该状态，snapshot/config 不再将其作为可调参数
+暴露，`MISSION_DONE` 只生成终局 summary，不调用 SCM helper。
+
+旧客户端发送精确 legacy `auto_ff_master=false` 时该字段被忽略，其它时间参数正常
+应用；任何非 `false` 值（包括 `true`）都会在应用其它更新前以
+`auto_ff_master is disabled in the competition runtime` 明确拒绝。引用与 AST 审计
+证明 `ff_master_to_integration()` 在删除完成分支后无生产调用者，因此 helper、
+专用 `subprocess` import 与旧 data-root 推导一并删除，没有迁移到
+`runtime/<mission-id>/integration`。
+
+`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者。旧 AO Client/CLI 和仍依赖
+`AO_DATA_DIR` 的兼容代码/夹具属于 R2 cleanup，本 PR 不顺手删除。Panel 定向回归
+`33 passed in 0.42s`；包含 single-worker、gate-first 与 final verifier 的直接回归
+`53 passed in 41.77s`；完整离线基线 `python -m pytest tests -q` 为
+`380 passed in 117.70s`。`python -m compileall -q src panel run_mission.py`、
+`git diff --check`、Panel/生产 consumer 文本扫描与 6 份指定文档的本地链接检查
+均退出 0。本任务不运行真实 AO Worker/E2E。
+
 ## 十、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
@@ -400,12 +428,12 @@ worktree 与 Verifier 类测试；本次新增的 single-lane fake Mission 为 `
 | K9 | 多套状态与投影没有明确主从 | R1/R2 | 已解决：代码与当前文档均明确 StateStore/AO Worker 事实与后置投影关系；R2 只处理重复实现 |
 | K10 | 配置项重复、未接线或 UI/后端语义不同 | R4 | 部分解决：R2-0 已接入 `ao.base_url` 与 `ao.request_timeout_seconds`；`roles.*`、`roles.max_parallel_workers` 等其余配置仍待 R4 收敛 |
 | K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
-| K12 | 自动审批和自动 push 边界过宽 | R4 | 已确认：自动审批已接线；`auto_ff_master` 默认关闭但可由面板 API 开启并 push |
+| K12 | 自动审批和自动 push 边界过宽 | R3/R4 | 部分解决：competition Panel 已删除自动 master/main merge 与 origin push；自动审批仍待 R4 审计 |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已解决：清理永久冻结数字；R1-3 main 基线为 295，R1-4 实跑 296，以后以 CI/当前输出为准 |
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导。仍未解决：clean clone bootstrap/安装脚本、AO 首次配置 UX、Project 注册/选择、`auto_ff_master` legacy data root；不得宣称为通用安装包 |
+| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导；`CLAO_AO_DATA_DIR` 已无当前生产消费者。仍未解决：clean clone bootstrap/安装脚本、AO 首次配置 UX、Project 注册/选择；旧 `AO_DATA_DIR` 兼容模块待 R2 审计，不得宣称为通用安装包 |
 
 ## 十一、阶段边界
 
@@ -441,7 +469,8 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
   `VERIFIER_PENDING` 可恢复，Mission 终局调用保留；高风险时的显式按需策略未新增；
 - gate-first happy path 已完成离线实现：证据充分的首次普通 Task 直接运行
   deterministic Gate；证据不足、Gate FAIL、alert/retry/恢复保留 Auditor → Planner；
-- 隐藏或显式标记 `auto_ff_master` 为实验性高风险功能；
+- 自动 master/main merge 与 origin push 已从 competition Panel runtime 删除；
+  `MISSION_DONE` 只保留 verified integration，不触发用户仓库写回；
 - 当前 `ClosedLoop` 仍有 bounded L0 direct worker nudge；R3 决定保留该
   fast path，还是将自动 Worker 指令统一路由 Planner；
 - fingerprint 去 source 与 thread revision 支持多轮新证据继续低优先级，
@@ -455,7 +484,8 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 - 生效配置；
 - 人工 override；
 - 审批白名单；
-- 自动 push/merge 默认关闭或移除。
+- 若未来需要主分支交付，单独设计用户显式 SCM 操作；不恢复 Mission DONE
+  隐式 push/merge。
 
 ### R5
 
@@ -470,9 +500,9 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 
 当前顺序固定为：Competition behavior convergence → 重复模块清理 → clean
 delivery/installer/first-run。R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；
-Verifier final-only、gate-first、event freshness 与默认单 Worker 已完成离线实现。
-本 PR 审计合并后可用 `tasks/e2e-smoke.json` 运行一次标准 GUI E2E。本轮不运行
-真实 AO Worker/GUI E2E，也不启动 R2 删除。
+Verifier final-only、gate-first、event freshness、默认单 Worker 与自动 SCM
+副作用移除均已完成；核心 single-worker 标准 smoke 已通过。本安全边界/UI PR 不
+运行真实 AO Worker/GUI E2E，也不启动 R2 删除。
 
 ## 十二、停止条件
 

@@ -72,9 +72,14 @@ Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
 - 历史 runtime 若已处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
 - 当前 Mission final path：`materialization → integration → Final Gate → Mission
   Verifier → MISSION_DONE / HUMAN`。Mission Verifier 是新 Mission 默认唯一的
-  正常路径 Verifier 调用。
+  正常路径 Verifier 调用。`MISSION_DONE` 只表示 verified integration 已通过 Final
+  Gate 与 Mission Verifier，结果保留在 `runtime/<mission-id>/integration`；不会
+  自动修改用户 `master`/`main`，也不会 push `origin`。未来主分支交付应是用户
+  显式 SCM 操作，不是 Mission DONE 隐式副作用。
 - 面板目前默认使用演示 Project；通用 AO Project 选择属于 R4。
 - AO 路径和安装尚未完全可移植，不能视为解压即用产品。
+- Competition runtime 不提供自动 push；`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常
+  生产消费者，遗留 `AO_DATA_DIR` 兼容模块留待 R2 引用审计。
 
 ## 验证
 

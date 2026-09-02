@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import subprocess
 import sys
 import threading
 import time
@@ -55,10 +54,6 @@ class PanelState:
             "l0_nudge_grace_seconds": 300,
         }
         self.errors = []
-        # 风险边界开关：MISSION_DONE 后把目标仓库 master 快进到已验证的
-        # 集成头并推 origin（AO 的 worker 基线取自 origin/master，只合本地
-        # 会让下个任务的 worker 拿到旧基线）。默认关。
-        self.auto_ff_master = False
 
     # ---- mission lifecycle
     def start_mission(self, mission_dict: dict) -> str:
@@ -99,14 +94,6 @@ class PanelState:
                 "final_state": rt.controller.state,
                 "stopped_by_user": self.stop_flag.is_set(),
             }
-            if (rt.controller.state == "MISSION_DONE" and self.auto_ff_master
-                    and not self.stop_flag.is_set()):
-                try:
-                    self.last_summary["auto_ff"] = ff_master_to_integration(
-                        rt.mission.mission_id, rt.mission.project_id)
-                except Exception as e:                       # never die mute
-                    self.last_summary["auto_ff"] = {"error": str(e)}
-                    self.errors.append("%s: auto-ff: %s" % (now_iso(), e))
         except Exception as e:                               # never die mute
             self.errors.append("%s: runner: %s" % (now_iso(), e))
 
@@ -160,21 +147,21 @@ class PanelState:
 
     # ---- live config
     def set_config(self, updates: dict) -> dict:
+        if ("auto_ff_master" in updates
+                and updates["auto_ff_master"] is not False):
+            raise RuntimeError(
+                "auto_ff_master is disabled in the competition runtime")
         with self.lock:
             for k in self.live:
                 if k in updates:
                     self.live[k] = max(1, int(updates[k]))
-            if "auto_ff_master" in updates:
-                self.auto_ff_master = bool(updates["auto_ff_master"])
             if self.rt:      # controller reads these per call -> instant
                 obs = self.rt.controller.cfg.setdefault("observer", {})
                 for k in ("idle_audit_cooldown_seconds",
                           "blocked_escalation_seconds",
                           "l0_nudge_grace_seconds"):
                     obs[k] = self.live[k]
-            out = dict(self.live)
-            out["auto_ff_master"] = self.auto_ff_master
-            return out
+            return dict(self.live)
 
 
 PANEL = PanelState()
@@ -196,64 +183,6 @@ def _rows(conn, sql, args=(), retries=3):
                 return []
             time.sleep(0.15)
     return []
-
-
-def ff_master_to_integration(mission_id: str, project_id: str) -> dict:
-    """Fast-forward the target repo's master to the mission's VERIFIED
-    integration head, then push to origin when the project has one.
-
-    Pushing is NOT optional under AO: workers branch from
-    refs/remotes/origin/master (ao.db sessions.diff_base_ref), so a
-    local-only merge hands the NEXT mission a stale base -> integration
-    conflict -> HUMAN (observed on MISSION-PANEL-20260830-203226).
-
-    Safety rails: refuse when the integration worktree is missing, when the
-    main checkout is not on master/main, or when tracked files are dirty.
-    Only ever fires after final gate + mission Verifier PASS (MISSION_DONE).
-    """
-    data_dir = os.environ.get("CLAO_AO_DATA_DIR", "").strip()
-    if not data_dir:
-        raise RuntimeError(
-            "auto_ff_master requires explicit CLAO_AO_DATA_DIR; "
-            "the normal Mission runtime does not assume AO worktree storage")
-    wt = Path(data_dir) / "worktrees" / project_id / \
-        ("integration-" + mission_id)
-    if not wt.exists():
-        raise RuntimeError("集成 worktree 不存在: %s" % wt.name)
-
-    def git(*args, cwd):
-        p = subprocess.run(["git"] + list(args), cwd=cwd,
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=60)
-        if p.returncode != 0:
-            raise RuntimeError("git %s: %s"
-                               % (args[0], (p.stderr or p.stdout or "")[:200]))
-        return (p.stdout or "").strip()
-
-    common = git("rev-parse", "--path-format=absolute", "--git-common-dir",
-                 cwd=str(wt))
-    main_repo = str(Path(common).parent)
-    branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=main_repo)
-    if branch not in ("master", "main"):
-        raise RuntimeError("主仓库当前在 %s 分支，拒绝自动合并" % branch)
-    dirty = [ln for ln in git("status", "--porcelain", cwd=main_repo)
-             .splitlines() if ln and not ln.startswith("??")]
-    if dirty:
-        raise RuntimeError("master 有未提交的 tracked 改动，拒绝自动合并: %s"
-                           % dirty[0])
-    head = git("rev-parse", "integration-" + mission_id, cwd=main_repo)
-    before = git("rev-parse", "HEAD", cwd=main_repo)
-    if before != head:
-        git("merge", "--ff-only", head, cwd=main_repo)
-    remotes = git("remote", cwd=main_repo).split()
-    pushed = False
-    if "origin" in remotes:
-        git("push", "origin", "HEAD:%s" % branch, cwd=main_repo)
-        pushed = True
-    note = ("master %s -> %s" % (before[:8], head[:8])) \
-        if before != head else "master 已是最新"
-    return {"repo": main_repo, "master": head[:8], "pushed": pushed,
-            "note": note + ("，已推 origin" if pushed else "")}
 
 
 def list_missions() -> list:
@@ -289,7 +218,6 @@ def snapshot() -> dict:
         rt = PANEL.rt
         running = PANEL.running()
         live = dict(PANEL.live)
-        live["auto_ff_master"] = PANEL.auto_ff_master
         errs = PANEL.errors[-10:]
         summary = PANEL.last_summary
     snap = {"ok": True, "running": running, "config": live,

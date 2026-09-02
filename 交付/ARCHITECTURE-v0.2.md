@@ -119,7 +119,11 @@ materialization
 ```
 
 Mission Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。VerifierProvider
-仍是正式角色；高风险子任务的显式按需策略尚未实现。
+仍是正式角色；高风险子任务的显式按需策略尚未实现。`MISSION_DONE` 只表示
+verified integration 已通过 Final Gate 与 Mission Verifier，integration 保留在
+`runtime/<mission-id>/integration`。它不修改用户 `master`/`main`，也不 push
+`origin`；未来若需要主分支交付，应由用户显式发起 SCM 操作，而不是把写回作为
+Mission DONE 的隐式副作用。
 
 ## 三、控制权与真实消息路径
 
@@ -250,11 +254,12 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 - R2：生成主路径引用图，逐组证明并收敛重复 AO Client、Observer、Gate、
   协议和旧 CLI；在此之前不删除参考目录或兼容模块。
 - R3：Verifier final-only、gate-first、event freshness 与默认 1 个 Worker/必要时
-  最多 2 个已完成离线实现；本 PR 审计合并后可用固定 `tasks/e2e-smoke.json`
-  运行标准 E2E；issue fingerprint 和 thread revision 仍待后续；决定保留当前有界
-  L0 fast path，还是将自动 Worker 指令统一由 Planner 发出。
+  最多 2 个已完成，并由 `MISSION-E2E-SMOKE-20260902-204459` 标准 smoke 验证；
+  competition runtime 的自动 master/main merge 与 origin push 已移除；issue
+  fingerprint 和 thread revision 仍待后续；决定保留当前有界 L0 fast path，
+  还是将自动 Worker 指令统一由 Planner 发出。
 - R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
-  保持自动 push/merge 默认关闭。
+  以及未来是否设计用户显式 SCM 交付操作；不恢复 Mission DONE 隐式写回。
 - R5：CI、全新 clone 安装、AO 官方依赖说明、路径可移植性、真实 Demo 和
   干净交付。
 
@@ -276,7 +281,8 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
    deterministic L0 local-error nudge；
 8. Bus 和所有展示产物都是派生投影，不参与恢复或裁决；
 9. 模型与 harness 可配置，当前默认契约为 Codex / `gpt-5.6-sol`；
-10. 自动 push、自动合并和破坏性审批保持默认关闭。
+10. Mission DONE 不自动修改用户 `master`/`main` 或 push `origin`；自动 push 不属于
+    competition runtime。
 
 “所有自动 Worker 指令统一由 Planner 发出”是 R3 收敛目标，不是 R1 当前实现
 不变量。
