@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -18,9 +20,16 @@ INDEX = SERVER.with_name("index.html")
 
 def _start_panel_mission(monkeypatch, tmp_path, max_subtasks=...):
     start = MagicMock()
+    project_path = tmp_path / "registered-project"
+    project_path.mkdir(exist_ok=True)
     monkeypatch.setattr(panel_server, "ROOT", tmp_path)
     monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
+    monkeypatch.setattr(panel_server, "_load_ao_projects", lambda: [{
+        "id": "project-a", "name": "Project A", "path": str(project_path),
+        "kind": "git",
+    }])
     body = {
+        "project_id": "project-a",
         "objective": "implement one function",
         "allowed_paths": "app.py",
         "acceptance_criteria": "the function works",
@@ -31,6 +40,62 @@ def _start_panel_mission(monkeypatch, tmp_path, max_subtasks=...):
     result = panel_server.Handler._start_mission(object(), body)
     assert result["ok"] is True
     return start.call_args.args[0]
+
+
+def _valid_mission_body(project_id="project-a"):
+    return {
+        "project_id": project_id,
+        "objective": "implement one function",
+        "allowed_paths": "app.py",
+        "acceptance_criteria": "the function works",
+        "gate_commands": "python -m pytest -q",
+    }
+
+
+def test_project_api_uses_current_ao_registry_and_public_runtime_config(
+        monkeypatch, tmp_path):
+    run_file = tmp_path / "running.json"
+    adapter = MagicMock()
+    adapter.get_projects.return_value = [{
+        "id": "project-a", "name": "Project A", "path": "C:/repo/a",
+        "kind": "git", "internal": "must-not-leak",
+    }]
+    adapter_type = MagicMock(return_value=adapter)
+    monkeypatch.setattr(panel_server, "AOAdapter", adapter_type)
+    monkeypatch.setattr(panel_server.run_mission, "load_config", lambda: {
+        "ao": {"base_url": "http://127.0.0.1:4321",
+               "request_timeout_seconds": 9},
+    })
+    monkeypatch.setattr(panel_server.run_mission, "resolve_ao_run_file",
+                        lambda: run_file)
+    response = MagicMock()
+
+    panel_server.Handler.do_GET(SimpleNamespace(
+        path="/api/projects", _json=response))
+
+    adapter_type.assert_called_once_with(
+        base_url="http://127.0.0.1:4321", timeout=9.0,
+        run_file=run_file)
+    adapter.get_projects.assert_called_once_with()
+    response.assert_called_once_with({
+        "ok": True,
+        "projects": [{"id": "project-a", "name": "Project A",
+                      "path": "C:/repo/a", "kind": "git"}],
+    })
+
+
+def test_project_api_reports_ao_failure_without_fabricated_project(monkeypatch):
+    monkeypatch.setattr(
+        panel_server, "_load_ao_projects",
+        MagicMock(side_effect=RuntimeError("AO daemon unavailable")))
+    response = MagicMock()
+
+    panel_server.Handler.do_GET(SimpleNamespace(
+        path="/api/projects", _json=response))
+
+    response.assert_called_once_with(
+        {"ok": False, "error": "AO daemon unavailable"}, 503)
+    assert "closed-loop-demo" not in str(response.call_args)
 
 
 def test_panel_mission_payload_uses_codex_worker_harness():
@@ -92,6 +157,72 @@ def test_panel_and_cli_share_build_runtime():
 def test_panel_omitted_max_subtasks_defaults_to_one(monkeypatch, tmp_path):
     mission = _start_panel_mission(monkeypatch, tmp_path)
     assert mission["budgets"]["max_subtasks"] == 1
+    assert mission["project_id"] == "project-a"
+
+
+def test_panel_requires_project_id_before_project_discovery(
+        monkeypatch, tmp_path):
+    start = MagicMock()
+    discovery = MagicMock(side_effect=AssertionError(
+        "missing project_id must fail before AO discovery"))
+    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
+    monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
+    monkeypatch.setattr(panel_server, "_load_ao_projects", discovery)
+    body = _valid_mission_body()
+    body.pop("project_id")
+
+    with pytest.raises(RuntimeError, match="project_id is required"):
+        panel_server.Handler._start_mission(object(), body)
+
+    discovery.assert_not_called()
+    start.assert_not_called()
+
+
+def test_panel_rejects_unknown_project_id(monkeypatch, tmp_path):
+    start = MagicMock()
+    project_path = tmp_path / "registered-project"
+    project_path.mkdir()
+    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
+    monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
+    monkeypatch.setattr(panel_server, "_load_ao_projects", lambda: [{
+        "id": "project-a", "name": "Project A", "path": str(project_path),
+        "kind": "git",
+    }])
+
+    with pytest.raises(RuntimeError, match="AO project not found: unknown"):
+        panel_server.Handler._start_mission(
+            object(), _valid_mission_body("unknown"))
+
+    start.assert_not_called()
+
+
+@pytest.mark.parametrize("path_kind", ["empty", "missing", "file"])
+def test_panel_rejects_unavailable_project_path_before_runtime(
+        monkeypatch, tmp_path, path_kind):
+    start = MagicMock()
+    if path_kind == "empty":
+        project_path = ""
+    elif path_kind == "missing":
+        project_path = str(tmp_path / "missing-project")
+    else:
+        path = tmp_path / "not-a-directory"
+        path.write_text("file", encoding="utf-8")
+        project_path = str(path)
+    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
+    monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
+    monkeypatch.setattr(panel_server, "_load_ao_projects", lambda: [{
+        "id": "project-a", "name": "Project A", "path": project_path,
+        "kind": "git",
+    }])
+
+    with pytest.raises(
+            RuntimeError,
+            match="AO project path unavailable: project-a"):
+        panel_server.Handler._start_mission(
+            object(), _valid_mission_body())
+
+    start.assert_not_called()
+    assert not (tmp_path / "tasks").exists()
 
 
 @pytest.mark.parametrize("value", [1, 2])
@@ -103,9 +234,16 @@ def test_panel_accepts_one_or_two_workers(monkeypatch, tmp_path, value):
 @pytest.mark.parametrize("value", [0, -1, 3])
 def test_panel_rejects_out_of_range_workers(monkeypatch, tmp_path, value):
     start = MagicMock()
+    project_path = tmp_path / "registered-project"
+    project_path.mkdir()
     monkeypatch.setattr(panel_server, "ROOT", tmp_path)
     monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
+    monkeypatch.setattr(panel_server, "_load_ao_projects", lambda: [{
+        "id": "project-a", "name": "Project A", "path": str(project_path),
+        "kind": "git",
+    }])
     body = {
+        "project_id": "project-a",
         "objective": "implement one function",
         "allowed_paths": "app.py",
         "acceptance_criteria": "the function works",
@@ -125,12 +263,70 @@ def test_panel_frontend_defaults_to_bounded_single_worker():
     assert 'max_subtasks:+$("f_sub").value||2' not in html
 
 
+def test_panel_frontend_loads_and_selects_ao_projects():
+    html = INDEX.read_text(encoding="utf-8")
+    assert 'id="f_project" disabled' in html
+    assert 'fetch("/api/projects")' in html
+    assert 'option.textContent=`${p.name} (${p.id})`' in html
+    assert '$("f_project").onchange=showSelectedProject' in html
+    assert 'Project path：${selected.path || "—"}' in html
+    assert 'kind：${selected.kind || "—"}' in html
+    assert 'option.textContent="AO 中没有已注册项目"' in html
+    assert 'error.textContent=e.message' in html
+    assert 'selector.disabled=false; start.disabled=false' in html
+    assert 'project_id:$("f_project").value' in html
+    assert "project_path:" not in html
+    assert "project_name:" not in html
+
+
 def test_panel_frontend_does_not_expose_auto_master_writeback():
     html = INDEX.read_text(encoding="utf-8")
     assert "k_ff" not in html
     assert "auto_ff_master" not in html
     assert "DONE 后自动合并 master" not in html
     assert "auto_ff" not in html
+
+
+def test_historical_resume_keeps_stored_project_id(monkeypatch, tmp_path):
+    mission_id = "M-HISTORICAL-PROJECT"
+    mission = {
+        "mission_id": mission_id,
+        "project_id": "historical-project",
+        "objective": "resume existing state",
+    }
+    db = tmp_path / "runtime" / mission_id / "state.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("CREATE TABLE missions (payload_json TEXT NOT NULL)")
+        conn.execute(
+            "INSERT INTO missions(payload_json) VALUES (?)",
+            (json.dumps({"mission": mission}),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    start = MagicMock()
+    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
+    monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
+    monkeypatch.setattr(
+        panel_server, "_load_ao_projects",
+        MagicMock(side_effect=AssertionError(
+            "resume must not use the new-Mission selector")))
+
+    result = panel_server.Handler._resume(
+        object(), {"mission_id": mission_id})
+
+    assert result == {"ok": True, "mission_id": mission_id, "resumed": True}
+    assert start.call_args.args[0]["project_id"] == "historical-project"
+
+
+def test_panel_project_selector_has_no_demo_or_ao_database_fallback():
+    source = SERVER.read_text(encoding="utf-8")
+
+    assert 'body.get("project_id") or "closed-loop-demo"' not in source
+    assert "AO_DATA_DIR" not in source
+    assert "ao.db" not in source
 
 
 def test_panel_snapshot_config_has_only_live_time_parameters(

@@ -1,6 +1,6 @@
 # v0.2 当前架构说明
 
-> 状态：R1 实现事实基线
+> 状态：R1/R2 主链与当前 R3/R4 已实现事实基线
 >
 > 权威架构：与仓库根目录 `docs/PROJECT.md` 保持一致
 > 当前主产品候选：`交付/closed-loop-v2/`
@@ -52,6 +52,15 @@ run_mission.py main()
 ```
 
 Panel 自行维护轮询线程，没有调用 `run_loop()`，但没有创建第二套 Controller。
+
+新建 Mission 前，Panel 的 `GET /api/projects` 使用现有 `AOAdapter.get_projects()`
+读取 AO 官方 `/api/v1/projects`，仅向前端返回 `id/name/path/kind`。用户从这些已注册
+Project 中选择；浏览器创建 Mission 时只提交 `project_id`。后端在创建
+runtime/Worker 前重新查询 AO，确认 ID 仍存在且 `Path(path).is_dir()`，否则明确
+拒绝。该发现路径复用正常 runtime 的公开 base URL、timeout 与 runfile 配置，不读取
+`ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录，也不伪造 `closed-loop-demo`。
+Project 注册仍由 AO 负责；CLI 仍通过 Mission JSON 显式提供 `project_id`。历史
+Mission 的查看/resume 使用已持久化的原始 ID，不受新建表单 selector 影响。
 
 ## 二、当前角色与程序
 
@@ -236,6 +245,8 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 ## 六、当前已实现
 
 - Panel 发起 Mission，CLI/Panel 复用运行时组装；
+- Panel 从 AO 官方 Project registry 发现已注册项目，新建 Mission 显式选择并在
+  启动前重验 ID/path；
 - 单 Worker Mission 确定性规划；双 Worker 候选才调用 Planner 分解；
 - AO Codex Worker 执行；
 - Observer 确定性观察；
@@ -258,8 +269,8 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
   competition runtime 的自动 master/main merge 与 origin push 已移除；issue
   fingerprint 和 thread revision 仍待后续；决定保留当前有界 L0 fast path，
   还是将自动 Worker 指令统一由 Planner 发出。
-- R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
-  以及未来是否设计用户显式 SCM 交付操作；不恢复 Mission DONE 隐式写回。
+- R4：AO Project selector 已完成；配置真实消费、人工 override、审批白名单，
+  以及未来是否设计用户显式 SCM 交付操作仍待后续；不恢复 Mission DONE 隐式写回。
 - R5：CI、全新 clone 安装、AO 官方依赖说明、路径可移植性、真实 Demo 和
   干净交付。
 

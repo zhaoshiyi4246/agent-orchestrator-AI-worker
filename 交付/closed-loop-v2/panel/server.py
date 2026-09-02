@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 import run_mission  # noqa: E402
+from loopcore.ao_adapter import AOAdapter  # noqa: E402
 from loopcore.envelope import MessageKind  # noqa: E402
 from loopcore.mission import MISSION_TERMINAL  # noqa: E402
 from loopcore.mission_contracts import new_mission_max_subtasks  # noqa: E402
@@ -165,6 +166,23 @@ class PanelState:
 
 
 PANEL = PanelState()
+
+
+# -------------------------------------------------------- AO projects
+def _load_ao_projects() -> list[dict]:
+    """Read the current AO Project registry through the public REST adapter."""
+    cfg = run_mission.load_config() or {}
+    ao_cfg = cfg.get("ao") or {}
+    adapter = AOAdapter(
+        base_url=ao_cfg.get("base_url") or "http://127.0.0.1:3001",
+        timeout=float(ao_cfg.get("request_timeout_seconds", 15)),
+        run_file=run_mission.resolve_ao_run_file(),
+    )
+    return [
+        {key: project.get(key) for key in ("id", "name", "path", "kind")}
+        for project in adapter.get_projects()
+        if isinstance(project, dict)
+    ]
 
 
 # --------------------------------------------------------------- snapshot
@@ -374,6 +392,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             self._json(snapshot())
             return
+        if path == "/api/projects":
+            try:
+                self._json({"ok": True, "projects": _load_ao_projects()})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 503)
+            return
         if path == "/api/stream":
             self._sse()
             return
@@ -426,6 +450,18 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- mission builders
     def _start_mission(self, body: dict) -> dict:
+        project_id = str(body.get("project_id") or "").strip()
+        if not project_id:
+            raise RuntimeError("project_id is required")
+        projects = _load_ao_projects()
+        project = next((item for item in projects
+                        if str(item.get("id")) == project_id), None)
+        if project is None:
+            raise RuntimeError("AO project not found: " + project_id)
+        project_path = str(project.get("path") or "").strip()
+        if not project_path or not Path(project_path).is_dir():
+            raise RuntimeError("AO project path unavailable: " + project_id)
+
         objective = (body.get("objective") or "").strip()
         if not objective:
             raise RuntimeError("objective 不能为空")
@@ -447,7 +483,7 @@ class Handler(BaseHTTPRequestHandler):
             "max_subtasks": body.get("max_subtasks", 1)})
         mission = {
             "mission_id": mid,
-            "project_id": body.get("project_id") or "closed-loop-demo",
+            "project_id": project_id,
             "objective": objective,
             "allowed_paths": allowed,
             "forbidden_paths": [".git/**"],
