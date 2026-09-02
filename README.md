@@ -58,18 +58,23 @@ Worker 指令：MissionController → ActionExecutor → AO
 当前系统允许一个 Mission 拆出多个子任务；“默认 1 个 Worker、确有独立并行收益
 时最多 2 个”仍是后续收敛目标，不是当前实现不变量。
 
-当前真实 Task happy path 仍保留 Completion Auditor + Planner：
+证据充分的首次普通 Task completion 采用 deterministic gate-first：Worker 必须
+明确 idle/waiting_input/needs_input/exited/terminated、无 pending approval、无本
+tick actionable alert 或待处理 L0 fresh error，并且至少有一个非空 Gate 命令、
+AO workspace 可解析、Git `changed_paths` 可审计且至少包含一个 non-artifact
+change。
 
 ```text
 Worker
-→ Completion Auditor
-→ Planner
 → deterministic Task Gate
 → DONE
 ```
 
-新 Task 的 Gate PASS 不调用 Task Verifier，也不写 task-level verification row。
-历史 runtime 若已经处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
+任一条件不足（包括空 Gate、`changed_paths == []` 或 `None`）仍走 Completion
+Auditor → Planner。Gate FAIL 也仍从 `GATE_PENDING` 进入 `AUDIT_PENDING`，再由
+Auditor → Planner 裁决；不是所有 Task 都绕过 Completion Auditor。新 Task 的
+Gate PASS 不调用 Task Verifier，也不写 task-level verification row。历史 runtime
+若已经处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。
 
 当前 Mission final path 是：
 
@@ -90,7 +95,7 @@ Mission Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。Ve
 - Planner 自动分解；
 - AO Codex Worker 执行，Panel 与 CLI 均使用 `codex` harness；
 - Observer 确定性观察；
-- Auditor 向 Planner 提交审计结果并形成闭环；
+- 证据不足或异常时由 Auditor 向 Planner 提交审计结果并形成闭环；
 - deterministic Task Gate、Mission Final Gate 和 Mission Verifier；
 - StateStore 持久化及恢复；
 - stop/resume；
@@ -113,8 +118,8 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 
 ## 后续顺序
 
-1. Verifier final-only 已完成；合并当前 PR 后运行一次同题真实性能 E2E；
-2. 下一项进行 Completion Auditor / Planner happy-path convergence；
+1. Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
+2. gate-first happy path 已实现，合并当前 PR 后运行一次同题真实性能 E2E；
 3. 默认 1 个 Worker、确有必要时最多 2 个，以及隐藏或明确标记
    `auto_ff_master` 为实验性高风险功能，仍待后续；
 4. 再生成主路径引用图并清理重复模块和旧入口；

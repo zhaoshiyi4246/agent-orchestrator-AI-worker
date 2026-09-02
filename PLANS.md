@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R3 Competition behavior convergence
-- 当前任务：Competition behavior convergence #1 — Task Verifier final-only
-- 当前状态：首次完整 GUI happy path 已到达 `MISSION_DONE`；新 Task Gate PASS 已收敛为直接 DONE，历史 `VERIFIER_PENDING` 与 Mission Final Verifier 保持兼容
-- 下一步：本 PR 审计合并后运行一次同题性能 GUI E2E；Completion Auditor / Planner 优化作为下一项独立任务，不直接进入 R2-1
+- 当前任务：Competition behavior convergence #2 — gate-first happy path
+- 当前状态：PR #11 final-only 后同题 E2E 已到达 `MISSION_DONE`；证据充分的首次普通 Task completion 已实现 `WORKER_RUNNING → GATE_PENDING → DONE`，证据不足和异常仍保留 Auditor → Planner
+- 下一步：本 PR 审计合并后运行一次同题性能 GUI E2E；随后继续其余 Competition behavior convergence，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -31,7 +31,7 @@
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
-| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#1 Verifier final-only） |
+| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#2 gate-first happy path） |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
@@ -291,6 +291,38 @@ Mission Verifier 不变，完整 fake Mission 证明 Task Verifier 为 0、Missi
 `git diff --check` 与修改文档的新增 Markdown 链接扫描均退出 0；本任务不优化
 测试性能。
 
+### PR #11 性能 E2E 与 gate-first happy path
+
+PR #11 final-only 合并后的同题真实性能 E2E `MISSION-PANEL-20260902-000139`
+到达 `MISSION_DONE`，总耗时 `646.116s`；相对旧基线
+`MISSION-PANEL-20260901-214216` 的 `776.897s` 节省 `130.781s / 16.83%`。
+该次真实运行已验证 Task Verifier 为 0、Mission Verifier 为 1、
+`GATE_PENDING → DONE` 与 Mission Final Gate/Verifier 均正确；剩余普通 Task
+happy path 的 Completion Auditor 与 completion Planner 分别约为 `125s` 和
+`122s`。
+
+本次 #2 最小收敛只优化首次 `WORKER_RUNNING` completion。Worker 必须明确处于
+idle/waiting_input/needs_input/exited/terminated，且没有 pending approval、本 tick
+的 actionable Observer alert 或需要 L0 nudge 的 fresh error；Task 至少有一个非空 Gate
+命令；AO workspace 可解析；Git `changed_paths` 可审计且至少包含一个 non-artifact
+change。全部满足时执行 `WORKER_RUNNING → GATE_PENDING → _run_gate()`：Gate PASS
+直接 DONE，Completion Auditor、completion Planner 与 Task Verifier 调用均为 0；
+Gate FAIL 保持 `GATE_PENDING → AUDIT_PENDING → Auditor → Planner`。
+
+空 Gate、`changed_paths == []`、`changed_paths == None`、workspace/base 不可审计或
+其他任一条件不足都继续 Completion Audit。本次没有改变 `WORKER_RETRYING`
+completion、actionable alert、active-turn `REPEATED_ERROR` 延迟、L0 nudge、Mission
+Final Gate/Verifier、historical `VERIFIER_PENDING`、Worker 数量、`auto_ff_master`、
+Panel UI 或 Planner decomposition。
+
+新增 gate-first 定向回归 `11 passed in 12.35s`；包含审批、alert/L0、retry、
+historical verifier 与完整 fake Mission 的直接回归为 `60 passed in 43.42s`；完整
+离线基线为 `354 passed in 53.41s`。完整 fake Mission 通过真实 `ClosedLoop.step()`
+证明 clean Task Auditor 为 0、completion Planner 为 0、Task Verifier 为 0，Mission
+Verifier 为 1，最终为 `MISSION_DONE`。`compileall` 退出码为 0。本轮按要求未运行
+真实 GUI E2E。`git diff --check` 与 6 份修改文档的本地 Markdown 链接扫描均
+退出 0（3 个本地链接存在，missing 为 0）。
+
 ## 十、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
@@ -344,6 +376,8 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 - Worker 默认 1，最多 2；
 - Verifier final-only 默认路径已完成：新普通 Task 不调用，历史
   `VERIFIER_PENDING` 可恢复，Mission 终局调用保留；高风险时的显式按需策略未新增；
+- gate-first happy path 已完成离线实现：证据充分的首次普通 Task 直接运行
+  deterministic Gate；证据不足、Gate FAIL、alert/retry/恢复保留 Auditor → Planner；
 - 隐藏或显式标记 `auto_ff_master` 为实验性高风险功能；
 - 当前 `ClosedLoop` 仍有 bounded L0 direct worker nudge；R3 决定保留该
   fast path，还是将自动 Worker 指令统一路由 Planner；
@@ -373,8 +407,9 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 
 当前顺序固定为：Competition behavior convergence → 重复模块清理 → clean
 delivery/installer/first-run。R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；
-Verifier final-only 是当前 Competition convergence #1，合并后才运行一次同题
-性能 E2E，本轮不运行真实 AO Worker/GUI E2E，也不启动 R2 删除。
+Verifier final-only 的同题性能 E2E 已完成；gate-first happy path 是当前 Competition
+convergence #2，合并后才运行一次同题性能 E2E。本轮不运行真实 AO Worker/GUI
+E2E，也不启动 R2 删除。
 
 ## 十二、停止条件
 

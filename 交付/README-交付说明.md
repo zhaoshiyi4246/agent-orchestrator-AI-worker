@@ -46,11 +46,13 @@ Auditor、Verifier 和 Observer 都不直接向 Worker 下发自动执行指令�
 当前正常路径为：
 
 ```text
-Worker
-→ Completion Auditor
-→ Planner
+Worker idle（确定性证据充分）
 → deterministic Task Gate
 → DONE
+
+证据不足或异常
+→ Completion Auditor
+→ Planner
 
 materialization
 → integration
@@ -59,8 +61,14 @@ materialization
 → MISSION_DONE / HUMAN
 ```
 
-新 Task Gate PASS 不调用 Task Verifier、不写 task-level verification row；历史
-runtime 若已处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。Mission
+gate-first 只用于首次 `WORKER_RUNNING` 的明确
+idle/waiting_input/needs_input/exited/terminated Worker：必须无
+pending approval、无 actionable alert 或待处理 L0 fresh error，且非空 Gate、AO
+workspace 与至少一个可审计的 non-artifact Git change 同时存在。空 Gate、无变更、
+change set 未知或 workspace 不可解析继续走 Completion Auditor → Planner；Gate
+FAIL 也继续由 Auditor → Planner 裁决。新 Task Gate PASS 不调用 Completion
+Auditor、completion Planner 或 Task Verifier，也不写 task-level verification row；
+历史 runtime 若已处于 `VERIFIER_PENDING`，仍按旧 task verifier 路径恢复。Mission
 Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。
 
 ## 目录结构
@@ -113,15 +121,15 @@ bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完�
 - Planner 自动分解；
 - Panel/CLI 的 AO Codex Worker 执行；
 - Observer 确定性观察；
-- Auditor → Planner 闭环；
+- 证据不足或异常时的 Auditor → Planner 闭环；
 - deterministic Task Gate、Mission Final Gate 和 Mission Verifier；
 - StateStore 恢复、stop/resume；
 - UI 时间线与派生的 Markdown/JSONL。
 
 仍待后续：
 
-- Verifier final-only 已完成，合并当前 PR 后待一次同题真实性能 E2E；
-- 下一项进行 Completion Auditor / Planner happy-path convergence；
+- Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
+- gate-first happy path 已实现，合并当前 PR 后待一次同题真实性能 E2E；
 - 默认 1 个 Worker、按需最多 2 个，以及隐藏或显式标记
   `auto_ff_master` 为实验性高风险功能，仍待后续；
 - 比赛行为收敛后再做重复模块和旧入口清理；

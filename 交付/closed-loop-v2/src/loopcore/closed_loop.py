@@ -1,6 +1,8 @@
 """Closed-loop controller.
 
-Wires: Observer -> Auditor -> Planner -> ActionExecutor -> (loop) -> Gate.
+Wires exceptional evidence through Observer -> Auditor -> Planner ->
+ActionExecutor, while an evidence-rich first completion can run the
+deterministic Gate before invoking semantic roles.
 
 A single pass (`step()`) reads fresh AO events for the bound Worker, runs the
 Observer, and if a new alert fires builds an EvidenceBundle -> Auditor ->
@@ -315,10 +317,11 @@ class ClosedLoop:
         # A REPEATED_ERROR is still a durable Observer fact, but an active AO
         # turn is not stable semantic evidence yet.  Do not interrupt the
         # turn (AO rejects mid-turn remediation) or capture a pre-edit gate;
-        # once AO reports idle/exited, the existing quiet-completion path
-        # audits the latest workspace instead.  Unknown status fails closed
-        # to the established alert path; only an explicit activity=active
-        # defers it.  NO_PROGRESS semantics are intentionally unchanged.
+        # once AO reports idle/exited, the existing quiet-completion path uses
+        # the latest workspace: deterministic Gate first when eligible,
+        # otherwise Completion Audit. Unknown status fails closed to the
+        # established alert path; only an explicit activity=active defers it.
+        # NO_PROGRESS semantics are intentionally unchanged.
         worker_active = False
         if new_alerts and any(
                 getattr(alert, "alert_type", "") == "REPEATED_ERROR"
@@ -343,16 +346,29 @@ class ClosedLoop:
             pass
         elif not new_alerts:
             acted_l0 = False
+            pending_l0 = False
             if fresh_errors and self.state == ProjectState.WORKER_RUNNING:
                 # L0: a single/local execution failure (not yet repeated).
                 # Route a short nudge back to the current Worker WITHOUT
                 # escalating to the Auditor; repeated errors (L1) supersede.
                 acted_l0 = self._maybe_l0_nudge(fresh_errors)
                 result["acted"] = result["acted"] or acted_l0
-            if not acted_l0 and self._maybe_idle_completion(events):
+                # A fresh fingerprint may still be inside hatch grace and not
+                # have received its L0 nudge yet. It is not clean Gate-first
+                # evidence; retain Completion Audit if completion handling
+                # proceeds this tick. Already-nudged fingerprints preserve
+                # the existing deduped completion behavior.
+                pending_l0 = any(
+                    self.store.counter_get(
+                        "l0_nudged:" + self.task.task_id + ":" +
+                        (getattr(error, "fingerprint", "") or
+                         getattr(error, "event_id", ""))) <= 0
+                    for error in fresh_errors)
+            if not acted_l0 and self._maybe_idle_completion(
+                    events, allow_gate_first=not pending_l0):
                 # Quiet completion (review 簇二 elif-shadowing: a worker that
-                # once errored must still reach the completion audit — only
-                # an ACTED L0 nudge defers it, not the mere presence of a
+                # once errored must still reach completion handling — only an
+                # ACTED L0 nudge defers it, not the mere presence of a
                 # historical error event).
                 result["acted"] = True
         # bounded auto-approval: a worker blocked on a pending permission
@@ -622,20 +638,21 @@ class ClosedLoop:
         return sent
 
     # ------------------------------------------------- quiet-completion path
-    def _maybe_idle_completion(self, events: List) -> bool:
-        """Worker idle + no alerts + no fresh errors -> COMPLETION_AUDIT once.
+    def _maybe_idle_completion(self, events: List, *,
+                               allow_gate_first: bool = True) -> bool:
+        """Finish an idle first-run Worker by Gate when evidence is sufficient.
 
-        Covers the first-try-success worker (task done, nothing ever fired) and
-        the silent stall: both end in an idle worker with the loop parked in
-        WORKER_RUNNING and no path to DONE. One completion audit decides —
-        gate evidence in hand, Auditor judgment routes PASS->gate->DONE or
-        escalates. Paced by `idle_audit_cooldown_seconds` (default 300) so a
-        long-running healthy worker isn't audited every poll.
+        A WORKER_RUNNING task with a real command gate and an auditable,
+        non-empty non-artifact change can go straight to the deterministic
+        Gate.  Anything less certain keeps the established completion audit;
+        WORKER_RETRYING is handled earlier in step() and never enters this
+        fast path.  Completion audits remain paced by
+        `idle_audit_cooldown_seconds` (default 300).
         """
         if self.state not in (ProjectState.WORKER_RUNNING,
                               ProjectState.AUDIT_PENDING) or self.dry_run:
             return False
-        if not self.task.worker_session_id or not events:
+        if not self.task.worker_session_id:
             return False
         ws = self._worker_status()
         if ws is None:
@@ -650,6 +667,15 @@ class ClosedLoop:
         if self._pending_approvals():
             self._maybe_auto_approve()
             return False
+        if allow_gate_first and self._try_gate_first_completion():
+            return True
+        # Preserve the historical quiet-completion pacing and activity guard
+        # whenever deterministic Gate evidence is insufficient. A
+        # non-artifact change can take the fast path without a same-tick event
+        # because AO status + Git are the authoritative facts; an audit still
+        # requires the existing observed-activity signal.
+        if not events:
+            return False
         cooldown = int(self.cfg.get("observer", {}).get(
             "idle_audit_cooldown_seconds", 300) or 300)
         last = self.store.counter_get("last_audit_at:" + self.task.task_id)
@@ -658,6 +684,40 @@ class ClosedLoop:
             return False
         self.store.counter_set("last_audit_at:" + self.task.task_id, now)
         self._completion_audit()
+        return True
+
+    def _try_gate_first_completion(self) -> bool:
+        """Run the Task Gate first for a clean, evidence-rich first attempt.
+
+        Returns False for every unknown or insufficient evidence case so the
+        caller can retain Completion Auditor -> Planner behavior.  In
+        particular, an empty command list, an unresolved workspace/base, a
+        Git inspection failure (None), and no non-artifact changes are never
+        interpreted as a successful empty Gate.
+        """
+        if self.state != ProjectState.WORKER_RUNNING:
+            return False
+        if not any(str(command).strip()
+                   for command in (self.task.gate_commands or [])):
+            return False
+        try:
+            worktree = self._worktree_path()
+            if not worktree:
+                return False
+            base = self._base_commit()
+            if not base:
+                return False
+            changed = wt.changed_paths(worktree, base)
+        except Exception:
+            return False
+        if not changed:
+            # Covers [] (no non-artifact change) and None (Git unavailable).
+            return False
+        self._transition(
+            ProjectState.GATE_PENDING, "closed_loop",
+            "worker idle with deterministic gate evidence",
+            {"changed_paths": changed})
+        self._run_gate()
         return True
 
     # ----------------------------------------------------------- budgets
