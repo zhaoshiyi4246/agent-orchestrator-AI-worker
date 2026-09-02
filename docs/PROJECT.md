@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；PR #11 final-only 后的真实性能 E2E `MISSION-PANEL-20260902-000139` 已以 `final gate pass + verifier PASS` 到达 `MISSION_DONE`，总耗时 `646.116s`；当前进行 Competition behavior convergence #2，为证据充分的首次普通 Task completion 增加 deterministic gate-first
+- 状态：R1 与 R2-0 主链已完成；PR #12 后的真实 E2E `MISSION-PANEL-20260902-115314` 证明 gate-first 会被 Mission shared routing 重放的历史 AO error 阻断；当前进行 Competition behavior convergence #2 的 event-freshness 最小修复
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -175,6 +175,23 @@ Completion Auditor、completion Planner 或 Task Verifier。Gate FAIL 仍进入
 `AUDIT_PENDING → Auditor → Planner`。空 Gate、`changed_paths == []`、
 `changed_paths == None`、workspace/base 不可审计或其他任一条件不足时，继续原有
 Completion Auditor → Planner 路径；`WORKER_RETRYING` completion 不使用 fast path。
+
+Mission shared routing 每个 project 每 tick 仍只调用一次
+`get_recent_events(project_id, since=0)`。该结果按 replay/full-history snapshot 处理：
+不使用 project-wide max sequence，而是在 `_route_events()` 中复用子任务
+`ClosedLoop._event_since[worker_session_id]`。Session 与 turn 保持既有 normalize
+语义；activity 仅在 `sequence` 大于该 Worker cursor 时 normalize，且只由该
+Worker 自己的 activity 推进 cursor。因此多 Worker 的 sequence 互不影响，
+REPLAN 后新 Worker 以新 session id 从自己的低 sequence 开始，不继承旧
+Worker cursor。
+
+activity cursor 只是同一进程的路由边界；`fresh_errors` 还必须通过持久化
+新鲜度检查。`ClosedLoop.step()` 在每次 `Observer.feed()` 前读取
+`StateStore.event_seen(event_id)`，只有之前未处理且为 activity error 的事件
+才进入 `fresh_errors`/L0。`Observer.feed()` 仍是 event 持久化和 alert dedup
+的权威入口，不复制 fingerprint 或 alert 逻辑。即使进程 crash/restart 使
+`_event_since` 回到 0，StateStore 中的 `event_id` 仍保证历史 error 不会重新
+成为 fresh error、L0 输入或 gate-first blocker。
 
 `VERIFIER_PENDING` 状态、VerifierProvider/VerifierResult 与完整 task verifier 路径
 仍保留：历史 runtime 若已持久化在 `VERIFIER_PENDING`，`ClosedLoop.step()` 会继续

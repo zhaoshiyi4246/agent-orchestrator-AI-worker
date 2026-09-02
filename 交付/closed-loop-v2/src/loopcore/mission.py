@@ -523,10 +523,18 @@ class MissionController:
 
     def _route_events(self, loop: ClosedLoop, worker_id: str) -> List:
         """Normalize raw AO items for ONE worker using the loop's own
-        normalizer (reuses ClosedLoop._collect_events filtering logic)."""
+        normalizer and per-worker activity cursor.
+
+        Mission polling intentionally receives a replay/full-history project
+        snapshot (one AO call per project tick). Sessions and turns retain
+        their existing normalization semantics; only activities at or below
+        this Worker Session's sequence cursor are suppressed.
+        """
         items = getattr(self, "_last_raw_items", []) or []
         turn_times: Dict[str, Dict[str, str]] = {}
         pid = self.mission.project_id
+        since = loop._event_since.get(worker_id, 0)
+        max_seq = since
         for item in items:
             if item["kind"] == "turn":
                 t = item["turn"]
@@ -546,9 +554,15 @@ class MissionController:
                 evs += loop.normalizer().from_turn(worker_id, pid,
                                                    item["turn"])
             elif item["kind"] == "activity":
+                sequence = item["activity"].get("sequence") or 0
+                if sequence <= since:
+                    continue
+                if sequence > max_seq:
+                    max_seq = sequence
                 evs += loop.normalizer().from_activity(
                     worker_id, pid, item["activity"],
                     turn_times.get(worker_id, {}), None)
+        loop._event_since[worker_id] = max_seq
         return evs
 
     # ------------------------------------------------------------- merge

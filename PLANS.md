@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R3 Competition behavior convergence
-- 当前任务：Competition behavior convergence #2 — gate-first happy path
-- 当前状态：PR #11 final-only 后同题 E2E 已到达 `MISSION_DONE`；证据充分的首次普通 Task completion 已实现 `WORKER_RUNNING → GATE_PENDING → DONE`，证据不足和异常仍保留 Auditor → Planner
-- 下一步：本 PR 审计合并后运行一次同题性能 GUI E2E；随后继续其余 Competition behavior convergence，不直接进入 R2-1
+- 当前任务：Competition behavior convergence #2 follow-up — Mission shared-routing event freshness
+- 当前状态：真实 Mission `MISSION-PANEL-20260902-115314` 已定位历史 AO error 被重放为 fresh error 的根因；per-worker activity cursor 与 persistent `event_id` freshness 修复已通过完整离线基线
+- 下一步：创建本修复 PR；审计合并后可重跑同题 gate-first 性能 GUI E2E，随后继续其余 Competition behavior convergence，不直接进入 R2-1
 
 ## 一、更新规则
 
@@ -31,7 +31,7 @@
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
-| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#2 gate-first happy path） |
+| R3 | Competition behavior convergence：Worker、Verifier、auto_ff；issue/thread 低优先级 | 进行中（#2 gate-first event freshness） |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
@@ -322,6 +322,43 @@ historical verifier 与完整 fake Mission 的直接回归为 `60 passed in 43.4
 Verifier 为 1，最终为 `MISSION_DONE`。`compileall` 退出码为 0。本轮按要求未运行
 真实 GUI E2E。`git diff --check` 与 6 份修改文档的本地 Markdown 链接扫描均
 退出 0（3 个本地链接存在，missing 为 0）。
+
+### Mission shared-routing event freshness
+
+真实 Mission `MISSION-PANEL-20260902-115314` 在 Worker idle、无 approval、无 actionable
+alert、Gate 非空、workspace/base 可审计且 `changed_paths=["app.py"]` 时，
+仍未命中 gate-first。根因是 Mission 每 tick 从 `since=0` 取得 AO
+replay/full-history snapshot，shared routing 未应用已有的 per-worker activity cursor；
+重放的历史 error 又被 `ClosedLoop.step()` 直接放入 `fresh_errors`，从而形成
+pending L0，阻断 gate-first 并额外调用 Completion Auditor 与 Planner。
+
+当前最小修复保留每 project 每 tick 一次 AO API 调用，仍以 `since=0`
+读取 snapshot。`MissionController._route_events()` 复用
+`loop._event_since[worker_session_id]`：Session/turn 正常 normalize，activity 仅在
+`sequence > cursor` 时 normalize，且只由所属 Worker 推进自己的 cursor。
+多 Worker 的 sequence 互不污染；REPLAN 新 Worker 的 session id 可从 sequence 1
+开始，不继承旧 Worker cursor。
+
+`ClosedLoop.step()` 在 `Observer.feed()` 前检查持久化
+`StateStore.event_seen(event_id)`；只有未处理的 activity error 才是
+`fresh_errors`。Observer 继续独占 event 持久化和 alert dedup 权威，没有复制
+fingerprint/alert 逻辑。因此同进程 replay 由 per-worker cursor 过滤，
+crash/restart 后内存 cursor 丢失则由 persistent `event_id` 去重兜底。新回归证明
+历史 seq 2/3/4 不创建 L0 `hatched_at`，`allow_gate_first=True`，Task 以
+`WORKER_RUNNING → GATE_PENDING → DONE` 完成，Completion Auditor 与 completion
+Planner 均为 0；崩溃后新 `ClosedLoop` 注入相同历史 error 也可 gate-first。
+
+新增 5 项回归覆盖真实两 tick 重放、Session/turn 保留与 activity 过滤、
+多 Worker cursor 隔离、REPLAN 新 Worker 低 sequence 和 crash/restart 持久化去重。
+相关 event/Observer/crash-resume/gate-first/Mission 定向回归为
+`54 passed in 13.53s`。
+完整离线基线 `python -m pytest tests -q` 为
+`359 passed in 47.54s`。首次完整运行暴露了新回归夹具的零 alert cooldown
+与真实前提不一致（`358 passed, 1 failed`）：idle Session 作为真正新事件
+合法产生了 actionable alert。回归改用生产 600 秒 repeated-error cooldown 以
+表达“tick 2 无新 actionable alert”的前提；产品 Observer/alert 语义未修改。
+`python -m compileall -q src panel run_mission.py` 与 `git diff --check` 均退出 0；
+本轮按要求未运行真实 GUI E2E。
 
 ## 十、已知问题清单
 
