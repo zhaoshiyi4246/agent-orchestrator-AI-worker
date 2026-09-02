@@ -116,17 +116,24 @@ R2-0 已从当前生产主路径移除开发者绝对 AO 路径。AO Desktop 是
 - runfile：`CLAO_AO_RUN_FILE` → `~/.ao/running.json`；
 - 正常 Mission 启动/恢复必须能够解析 AO executable，否则 fail fast；
 - Panel 只读查看已有 Mission 存档不要求 AO executable，也不连接 AO、调用
-  Codex 或创建 Worker。
+  Codex 或创建 Worker；
+- Panel `GET /api/projects` 通过现有 `AOAdapter.get_projects()` 读取 AO 官方
+  Project registry，只返回 `id/name/path/kind`。用户新建 Mission 时选择一个已注册
+  Project，后端在创建 runtime/Worker 前重新查询并验证 ID 与本地目录 path；不读取
+  `ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录，也不伪造 demo Project。
 
 上述结论只表示“运行时路径可移植”，不表示“任意用户零配置安装”。clean clone
-bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完成；当前交付不能
-宣称为通用安装包或解压即用产品。
+bootstrap/安装脚本和 AO 首次配置 UX 仍未完成；Panel 已能选择 AO 中的已注册
+Project，但 Project 创建、注册和修改仍由 AO 负责。当前交付不能宣称为通用安装包
+或解压即用产品。
 
 ## 当前已实现与后续事项
 
 当前已实现：
 
 - Panel 发起 Mission；
+- Panel 从 AO 官方 registry 发现并选择已注册 Project，后端启动前重验
+  `project_id/path`，且不再默认绑定 `closed-loop-demo`；
 - 单 Worker Mission 确定性规划；双 Worker 候选才调用 Planner 分解；
 - Panel/CLI 的 AO Codex Worker 执行；
 - Observer 确定性观察；
@@ -146,10 +153,12 @@ bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完�
 - 最后完成 clean delivery、installer/bootstrap、AO first-run 和 CI 收尾；
 - fingerprint/source 与 thread revision 继续保持低优先级。
 
-Project 注册/选择与其他首次配置 UX 归比赛 UX/R4；若未来需要主分支交付，用户
-显式 SCM 操作也应作为独立设计处理。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产
-消费者；遗留 `AO_DATA_DIR` 兼容模块仍归 R2 引用审计。clean clone 安装归最终
-clean-delivery 阶段。
+Project selector 已完成；Project 注册本身仍由 AO 负责，其他首次配置 UX 继续归
+后续任务。历史 Mission 查看/resume 保留已持久化的 `project_id`；CLI 仍通过
+Mission JSON 显式提供 `project_id`。若未来需要主分支交付，用户显式 SCM 操作也应
+作为独立设计处理。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；遗留
+`AO_DATA_DIR` 兼容模块仍归 R2 引用审计。clean clone 安装归最终 clean-delivery
+阶段。
 
 ## 本地验证
 

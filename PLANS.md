@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R3 Competition behavior convergence
-- 当前任务：Competition behavior convergence #4 — disable automatic master push
-- 当前状态：正常 Panel runtime 的自动 master/main merge 与 origin push 已移除；定向、完整离线、语法、diff 与文档检查均通过
-- 下一步：创建本任务 PR；本安全边界/UI PR 不运行真实 AO Worker/E2E，审计合并后再进入重复模块清理
+- 当前阶段：R4 产品化边界收敛
+- 当前任务：Project selector — 从 AO 官方 registry 选择新 Mission Project
+- 当前状态：Panel Project API、selector、启动前 ID/path 重验与历史 Mission 兼容已实现；Panel 定向 25 项、完整离线 390 项、语法、diff 与文档检查均通过
+- 下一步：提交并创建本任务 PR；本 UI/边界任务不运行真实 AO Worker/E2E
 
 ## 一、更新规则
 
@@ -31,8 +31,8 @@
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
-| R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 进行中（#4 disable automatic master push） |
-| R4 | 配置有效性、项目选择和高风险功能收敛 | 未开始 |
+| R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
+| R4 | 配置有效性、项目选择和高风险功能收敛 | 进行中（Project selector） |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
 ## 三、R0 验收条件
@@ -413,6 +413,30 @@ Competition Panel 已直接删除普通 UI 中的自动写回 checkbox、tooltip
 `git diff --check`、Panel/生产 consumer 文本扫描与 6 份指定文档的本地链接检查
 均退出 0。本任务不运行真实 AO Worker/E2E。
 
+### R4 Project selector
+
+Panel 新增只读 `GET /api/projects`：通过现有 `AOAdapter.get_projects()` 调用 AO
+官方 `/api/v1/projects`，只返回 `id/name/path/kind`。构造 Adapter 时复用
+`run_mission.load_config()`、`resolve_ao_run_file()` 以及正常 runtime 的 base URL、
+request timeout 与 runfile；不读取 `ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录。
+AO 不可用时返回 `ok=false` 与真实错误，不构造 `closed-loop-demo`。
+
+新建 Mission 表单在 Panel 启动和打开时加载 Project，可手动刷新，默认明确选中
+第一项并显示只读 path/kind；0 项或 API 错误时显示原因并禁用启动。浏览器只把
+selector 的 `project_id` 与原有 Mission 字段一起 POST。后端启动时再次读取 AO
+registry，拒绝缺失/未知 ID、空 path、path 不存在或不是目录的项目；全部验证都在
+写入任务文件与 `PANEL.start_mission()` 前完成。生产代码中的
+`body.get("project_id") or "closed-loop-demo"` 已删除，不自动选择、创建、注册或
+修改 Project。
+
+历史 Mission 的查看/resume 继续直接使用 StateStore 中已持久化的 Mission
+payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显式提供
+`project_id`，语义未改。Panel 定向回归为 `25 passed in 0.76s`；完整离线基线
+`python -m pytest tests -q` 为 `390 passed in 67.60s`；
+`python -m compileall -q src panel run_mission.py`、`git diff --check` 均退出 0；
+6 份指定文档的本地 Markdown 链接检查共检查 3 个链接，missing 为 0。本任务按
+要求未运行真实 AO Worker/GUI E2E。
+
 ## 十、已知问题清单
 
 | 编号 | 问题 | 计划阶段 | 状态 |
@@ -427,13 +451,13 @@ Competition Panel 已直接删除普通 UI 中的自动写回 checkbox、tooltip
 | K8 | thread 缺少 revision 裁决语义 | R3 | 已确认：同一 issue 只允许一次 verdict，没有 revision 字段或重裁决路径 |
 | K9 | 多套状态与投影没有明确主从 | R1/R2 | 已解决：代码与当前文档均明确 StateStore/AO Worker 事实与后置投影关系；R2 只处理重复实现 |
 | K10 | 配置项重复、未接线或 UI/后端语义不同 | R4 | 部分解决：R2-0 已接入 `ao.base_url` 与 `ao.request_timeout_seconds`；`roles.*`、`roles.max_parallel_workers` 等其余配置仍待 R4 收敛 |
-| K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已确认：项目缺省/回退均为 `closed-loop-demo`，没有 AO Project 列表选择路径 |
+| K11 | 面板偏向 bundled demo，缺少真实 Project 选择 | R4 | 已解决：Panel 从 AO 官方 registry 读取 Project，新建 Mission 显式选择并在启动前重验 ID/path；`closed-loop-demo` 隐式 fallback 已删除 |
 | K12 | 自动审批和自动 push 边界过宽 | R3/R4 | 部分解决：competition Panel 已删除自动 master/main merge 与 origin push；自动审批仍待 R4 审计 |
 | K13 | 测试数量与冻结状态文档不一致 | R0/R1 | 已解决：清理永久冻结数字；R1-3 main 基线为 295，R1-4 实跑 296，以后以 CI/当前输出为准 |
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导；`CLAO_AO_DATA_DIR` 已无当前生产消费者。仍未解决：clean clone bootstrap/安装脚本、AO 首次配置 UX、Project 注册/选择；旧 `AO_DATA_DIR` 兼容模块待 R2 审计，不得宣称为通用安装包 |
+| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径与 Panel Project 选择已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导，Panel 只读 AO 官方 registry 并重验 ID/path；`CLAO_AO_DATA_DIR` 已无当前生产消费者。仍未解决：clean clone bootstrap/安装脚本与 AO 首次配置 UX；Project 注册仍由 AO 负责；旧 `AO_DATA_DIR` 兼容模块待 R2 审计，不得宣称为通用安装包 |
 
 ## 十一、阶段边界
 
@@ -480,7 +504,8 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 
 收敛产品化边界：
 
-- 项目选择；
+- 项目选择已完成：Panel 读取 AO 官方 registry，新建 Mission 显式选择并在启动前
+  重验 ID/path；Project 注册仍由 AO 负责；
 - 生效配置；
 - 人工 override；
 - 审批白名单；
@@ -498,11 +523,11 @@ convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-当前顺序固定为：Competition behavior convergence → 重复模块清理 → clean
-delivery/installer/first-run。R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；
-Verifier final-only、gate-first、event freshness、默认单 Worker 与自动 SCM
-副作用移除均已完成；核心 single-worker 标准 smoke 已通过。本安全边界/UI PR 不
-运行真实 AO Worker/GUI E2E，也不启动 R2 删除。
+R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；Verifier final-only、gate-first、
+event freshness、默认单 Worker、自动 SCM 副作用移除与 R4 Project selector 均已
+完成；核心 single-worker 标准 smoke 已通过。本 Project selector PR 不运行真实 AO
+Worker/GUI E2E，也不启动 R2 删除。后续仍按独立任务处理剩余配置/高风险边界、
+重复模块清理与 clean delivery/installer/first-run。
 
 ## 十二、停止条件
 

@@ -55,6 +55,11 @@ Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
 
 ## 当前边界
 
+- Panel `GET /api/projects` 通过现有 `AOAdapter.get_projects()` 读取 AO 官方
+  Project registry，只返回 `id/name/path/kind`。新建 Mission 时用户选择一个已注册
+  Project，浏览器只提交 `project_id`；后端启动前重新查询 AO 并要求对应 path 为
+  现存目录。缺失/未知 ID、无效 path 或 AO 不可用都会明确失败，不启动
+  runtime/Worker，也不伪造 demo Project。
 - 新 Mission 默认 `max_subtasks=1`：Controller 确定性生成唯一 S1，不调用
   decomposition Planner。Panel 只接受 1 或 2；显式选择 2 时 Planner 可返回
   1 或 2，默认优先 1，仅在有真实独立并行收益时使用第二 Worker。越界的新 Mission
@@ -76,7 +81,10 @@ Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
   Gate 与 Mission Verifier，结果保留在 `runtime/<mission-id>/integration`；不会
   自动修改用户 `master`/`main`，也不会 push `origin`。未来主分支交付应是用户
   显式 SCM 操作，不是 Mission DONE 隐式副作用。
-- 面板目前默认使用演示 Project；通用 AO Project 选择属于 R4。
+- Panel 已删除 `closed-loop-demo` 隐式 fallback。Project 注册、修改仍由 AO 负责；
+  CL-AO 只读发现并选择已注册项目。历史 Mission 查看/resume 保留其持久化的
+  `project_id`，不受当前 selector 值影响；`run_mission.py` CLI 仍通过 Mission JSON
+  显式提供 `project_id`，不增加 selector 语义。
 - AO 路径和安装尚未完全可移植，不能视为解压即用产品。
 - Competition runtime 不提供自动 push；`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常
   生产消费者，遗留 `AO_DATA_DIR` 兼容模块留待 R2 引用审计。

@@ -99,6 +99,9 @@ verified integration 已通过 Final Gate 与 Mission Verifier；结果保留在
 ## 当前已经实现
 
 - Panel 发起 Mission，CLI 与 Panel 复用同一运行时组装路径；
+- Panel 通过现有 `AOAdapter.get_projects()` 读取 AO 官方 Project registry；用户
+  新建 Mission 时从已注册 Project 中选择，浏览器只提交 `project_id`，后端在启动
+  runtime/Worker 前重新查询 AO 并确认对应 `path` 是现存目录；
 - 单 Worker Mission 确定性规划；仅双 Worker 候选调用 Planner 分解；
 - AO Codex Worker 执行，Panel 与 CLI 均使用 `codex` harness；
 - Observer 确定性观察；
@@ -122,8 +125,9 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
   已删除，不会迁移到当前 integration 路径。遗留 `AO_DATA_DIR` 兼容模块仍留待
   R2 按引用关系清理。
 
-这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。clean clone 的
-首次 bootstrap/安装脚本、AO 首次配置体验以及 Project 注册/选择尚未完成；当前
+这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。Panel 已能选择
+AO 中的已注册 Project，但不会创建、注册或修改 Project；Project 注册仍由 AO
+负责。clean clone 的首次 bootstrap/安装脚本与 AO 首次配置体验尚未完成；当前
 仓库不能宣称为通用安装包或“解压即用”产品。
 
 ## 后续顺序
@@ -133,8 +137,10 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 3. 新 Mission 默认 1 个 Worker、按需最多 2 个已完成；标准 smoke
    `MISSION-E2E-SMOKE-20260902-204459` 已到达 `MISSION_DONE`；
 4. Competition runtime 的自动 master/main merge 与 origin push 已移除；
-5. 再生成主路径引用图并清理重复模块和旧入口；
-6. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
+5. R4 Project selector 已接入 AO 官方 registry，并移除 Panel 的
+   `closed-loop-demo` 隐式 fallback；
+6. 再生成主路径引用图并清理重复模块和旧入口；
+7. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
 
 fingerprint 去 source 和 thread revision 继续作为低优先级治理项，不阻塞比赛
 行为收敛。
@@ -164,7 +170,10 @@ fingerprint 去 source 和 thread revision 继续作为低优先级治理项，�
 
 启动真实 Mission 前，需要先安装并运行 AO Desktop。若 `ao` 已在 PATH 中，无需
 额外设置 executable；否则在当前进程中将 `CLAO_AO_BIN` 指向已安装 AO CLI。
-仅当 AO 使用非标准 runfile 时才需要设置 `CLAO_AO_RUN_FILE`。
+仅当 AO 使用非标准 runfile 时才需要设置 `CLAO_AO_RUN_FILE`。Project 注册由 AO
+完成；Panel 的 `GET /api/projects` 只读展示 AO 已注册项目，新建 Mission 时必须
+显式选择一个。AO 不可用、ID 未知或对应路径不是现存目录时，Panel 不会启动
+runtime/Worker，也不会伪造 demo Project。
 
 ```powershell
 cd 交付/closed-loop-v2
@@ -177,7 +186,8 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 .\.venv\Scripts\python.exe .\panel\server.py
 ```
 
-`--dry-run` 不会连接 AO、创建 Worker、StateStore 或 runtime 目录；
+`run_mission.py` CLI 仍通过 Mission JSON 显式读取 `project_id`，不使用 Panel
+selector。`--dry-run` 不会连接 AO、创建 Worker、StateStore 或 runtime 目录；
 `max_subtasks=1` 时直接输出确定性单任务计划且不调用模型，值为 2 时才调用一次
 只读、ephemeral 的 Codex Planner。真实 Mission 运行需要 AO daemon 和已注册
 Project。`tasks/e2e-smoke.json` 是固定回归输入，不会被自动执行。

@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；Competition behavior convergence #4 已移除正常运行路径的自动 master/main 写回与 origin push
+- 状态：R1 与 R2-0 主链已完成；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -136,6 +136,18 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   `http://127.0.0.1:3001`，`ao.request_timeout_seconds` 已接入请求 timeout。
   `ActionExecutor` 承担 AO CLI 写操作，使用调用方传入的 executable 和可选
   runfile，不再无条件注入 `AO_DATA_DIR`。
+- Panel `GET /api/projects` 通过现有 `AOAdapter.get_projects()` 读取 AO 官方
+  `/api/v1/projects`，并只返回 `id/name/path/kind`。该只读发现路径复用
+  `load_config()`、`resolve_ao_run_file()` 以及正常 runtime 的 base URL、request
+  timeout 和 runfile，不读取 `ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录；AO
+  不可用时返回明确错误，不构造 demo Project。
+- 新建 Panel Mission 必须由用户选择一个已注册 AO Project。浏览器只提交
+  `project_id`；`POST /api/mission` 在创建 runtime/Worker 前重新查询 AO Project
+  列表，拒绝缺失/未知 ID、空 path，以及 `Path(path).is_dir()` 不成立的项目。
+  Panel 不再隐式回退 `closed-loop-demo`，也不自动选择、创建、注册或修改其它
+  Project。Project 注册仍由 AO 负责；CLI 仍从 Mission JSON 显式读取
+  `project_id`。历史 Mission 的查看和 resume 继续使用 StateStore 中已持久化的
+  原始 `project_id`，不受当前 selector 值影响。
 - Mission integration worktree 不是 AO Session workspace，由 CL-AO 管理在
   `runtime/<mission-id>/integration`（即 StateStore 同目录的 `integration`）。
   最终 Gate/Verifier 直接复用该路径，不依赖已终止 Worker 的 AO workspace。
@@ -319,7 +331,7 @@ K18 的主生产路径已经移除 AO executable、runfile 的开发机绝对路
 
 - clean clone bootstrap/安装脚本：归最终 clean-delivery 阶段；
 - AO 首次配置 UX：归比赛 UX 与 clean-delivery 阶段；
-- Project 注册/选择：归比赛 UX/R4；
+- Project 选择：Panel 已通过 AO 官方 registry 完成；Project 注册仍由 AO 负责；
 - 旧 AO Client/CLI 和 `AO_DATA_DIR` 兼容模块：归 R2 引用审计；不得因为
   `CLAO_AO_DATA_DIR` 已无消费者而顺手删除所有 legacy 模块。
 
@@ -569,7 +581,9 @@ UI → 绕过 MissionController 改状态
 7. `roles.*.model`、`roles.max_parallel_workers` 等配置仍未被当前组装路径完整
    消费，面板还维护另一组运行时参数；AO 连接直接相关的 `ao.base_url` 与
    `ao.request_timeout_seconds` 已在 R2-0 接入共享 `build_runtime()`。
-8. 面板默认且回退到 `closed-loop-demo`，没有从 AO 项目列表选择真实 Project。
+8. 已收敛：Panel 从 AO 官方 Project registry 读取项目，新建 Mission 显式选择
+   `project_id`，后端启动前重查 ID/path；`closed-loop-demo` 隐式 fallback 已删除。
+   CLI 继续通过 Mission JSON 显式提供 `project_id`，Project 注册仍由 AO 负责。
 9. 自动审批仍存在并待 R4 审计；Panel 的 `auto_ff_master` 已移除，competition
    runtime 不会在 Mission DONE 后自动修改 master/main 或 push origin。
 10. 旧文档曾分别声称 247 或 272 项测试；这些冻结数字已清理。R1-3 的
@@ -586,13 +600,14 @@ UI → 绕过 MissionController 改状态
   `MISSION-E2E-SMOKE-20260902-204459` 已通过；自动 master/main merge 与 origin
   push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
-- R4：收敛配置、项目选择和高风险功能；
+- R4：Project selector 已完成；其余继续收敛配置和高风险功能；
 - R5：CI、全新安装、真实 Demo 与干净交付。
 
-当前执行优先级为：Competition behavior convergence → 重复模块清理 → clean
-delivery/installer/first-run。核心 single-worker 标准 smoke 已通过，本安全边界/UI
-任务不再运行真实 AO Worker/E2E；本轮不改变异常 Auditor/Planner、retry、alert/L0
-或 Mission final 验证语义，也不立即开始 R2-1。
+核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
+R4 Project selector 已完成。后续剩余 R4 边界、重复模块清理和 clean
+delivery/installer/first-run 仍按独立任务推进。本 Project selector 任务不运行真实
+AO Worker/E2E；本轮不改变异常 Auditor/Planner、retry、alert/L0 或 Mission final
+验证语义，也不立即开始 R2-1。
 
 ## 十、明确非目标
 
