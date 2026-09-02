@@ -307,8 +307,15 @@ class ClosedLoop:
         new_alerts = []
         fresh_errors = []
         for ev in events:
+            # Observer.feed remains the authority that persists events and
+            # de-duplicates alerts.  Freshness for same-tick L0 routing must
+            # be sampled before feed records the event: Mission snapshots can
+            # replay full AO activity history, and a restarted process loses
+            # its in-memory sequence cursor while StateStore does not.
+            was_seen = self.store.event_seen(ev.event_id)
             new_alerts += self.observer.feed(ev)
-            if getattr(ev, "event_type", None) == "error" and \
+            if not was_seen and \
+                    getattr(ev, "event_type", None) == "error" and \
                     getattr(ev, "activity", False):
                 fresh_errors.append(ev)
         if self.state == ProjectState.TASK_READY and events:
