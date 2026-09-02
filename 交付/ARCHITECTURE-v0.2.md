@@ -57,7 +57,7 @@ Panel 自行维护轮询线程，没有调用 `run_loop()`，但没有创建第�
 
 | 角色或程序 | 数量与物理形态 | 默认模型 | 当前职责与控制权 |
 |---|---|---|---|
-| Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 拆解 Mission、接收 Audit/Gate/Verifier 证据并裁决；不直接编辑代码 |
+| Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 仅为双 Worker 候选按需拆解，并接收 Audit/Gate/Verifier 证据裁决；不直接编辑代码 |
 | Auditor | 1 个只读 headless Codex CLI Provider | `gpt-5.6-sol` | 做语义审计并向 Planner 提交结果；不直接向 Worker 下发自动指令 |
 | Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 新 Mission 正常路径只在 Mission 终局调用；历史 `VERIFIER_PENDING` Task 恢复仍可调用；不拥有 Worker 控制权 |
 | Worker | AO Chat-mode Codex Worker | `gpt-5.6-sol` | harness=`codex`；在 AO worktree 执行具体编码任务 |
@@ -82,9 +82,12 @@ Panel Mission payload、`MissionSpec`、`TaskSpec`、当前
 均为 `codex`；Worker model 由 `config/default.yaml` 的 `worker.model`
 进入 `ActionExecutor`，Panel 不另行硬编码 model。
 
-当前系统仍允许 Mission 拆出多个子任务，Panel 默认
-`max_subtasks=2`。默认 1 个 Worker、只有任务确实独立时才启用第 2 个，是
-R3 目标，不是当前实现不变量。
+新 Mission 默认 `max_subtasks=1`，此时 `MissionController` 确定性生成唯一
+`<mission-id>-S1` 标准计划，不调用 decomposition Planner。Panel 只接受 1 或 2；
+显式选择 2 时 Planner 可以返回 1 或 2，默认优先 1，仅在路径与验收可独立且有
+真实并行收益时启用第二 Worker。越界的新 Mission 明确拒绝，不静默 clamp。
+已持久化的 2-task 或更多 task 历史计划仍直接 hydrate，不重新 decomposition。
+`roles.max_parallel_workers=2` 保留为能力上限，当前没有运行时 consumer。
 
 证据充分的首次普通 Task completion 采用 deterministic gate-first：
 
@@ -229,7 +232,7 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 ## 六、当前已实现
 
 - Panel 发起 Mission，CLI/Panel 复用运行时组装；
-- Planner 自动分解；
+- 单 Worker Mission 确定性规划；双 Worker 候选才调用 Planner 分解；
 - AO Codex Worker 执行；
 - Observer 确定性观察；
 - 证据不足或异常时的 Auditor → Planner 闭环；
@@ -246,9 +249,9 @@ Bus traffic、Markdown、JSONL、拓扑和前端缓存均为派生视图，不�
 
 - R2：生成主路径引用图，逐组证明并收敛重复 AO Client、Observer、Gate、
   协议和旧 CLI；在此之前不删除参考目录或兼容模块。
-- R3：Verifier final-only 与 gate-first happy path 已完成离线实现；当前 PR 合并后
-  待一次同题真实性能 E2E；默认 1 个 Worker、必要时
-  最多 2 个、issue fingerprint 和 thread revision 仍待后续；决定保留当前有界
+- R3：Verifier final-only、gate-first、event freshness 与默认 1 个 Worker/必要时
+  最多 2 个已完成离线实现；本 PR 审计合并后可用固定 `tasks/e2e-smoke.json`
+  运行标准 E2E；issue fingerprint 和 thread revision 仍待后续；决定保留当前有界
   L0 fast path，还是将自动 Worker 指令统一由 Planner 发出。
 - R4：通用 AO Project 选择、配置真实消费、人工 override、审批白名单，
   保持自动 push/merge 默认关闭。

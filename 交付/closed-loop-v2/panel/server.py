@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import run_mission  # noqa: E402
 from loopcore.envelope import MessageKind  # noqa: E402
 from loopcore.mission import MISSION_TERMINAL  # noqa: E402
+from loopcore.mission_contracts import new_mission_max_subtasks  # noqa: E402
 from loopcore.event_normalizer import now_iso  # noqa: E402
 
 PORT = int(os.environ.get("PANEL_PORT", "7100"))
@@ -514,6 +515,8 @@ class Handler(BaseHTTPRequestHandler):
             raise RuntimeError("至少一条验收条件")
         gates = [g.strip() for g in (body.get("gate_commands") or "")
                  .splitlines() if g.strip()] or ["python -m pytest -q"]
+        max_subtasks = new_mission_max_subtasks({
+            "max_subtasks": body.get("max_subtasks", 1)})
         mission = {
             "mission_id": mid,
             "project_id": body.get("project_id") or "closed-loop-demo",
@@ -524,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
             "gate_commands": gates,
             "user_instruction": body.get("user_instruction") or "",
             "worker_harness": "codex",
-            "budgets": {"max_subtasks": int(body.get("max_subtasks") or 2),
+            "budgets": {"max_subtasks": max_subtasks,
                         "max_total_replans": 2,
                         "max_runtime_seconds": 3600,
                         "subtask_budgets": {

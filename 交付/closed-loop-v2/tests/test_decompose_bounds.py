@@ -3,6 +3,8 @@ request (was "2..1", which made every LLM attempt fail schema validation
 and forced the mission into HUMAN with an empty error detail)."""
 import json
 
+import pytest
+
 from loopcore.planner_adapter import (CodexCliPlannerProvider as P,
                                       PROMPT_DIR)
 
@@ -27,8 +29,13 @@ def test_instruction_exactly_one_when_max_sub_1():
     assert "2..1" not in txt
 
 
-def test_instruction_range_when_max_sub_above_1():
-    assert "2..3" in P._decompose_instruction(3)
+def test_instruction_prefers_one_and_allows_two():
+    txt = P._decompose_instruction(2)
+    assert "1..2" in txt
+    assert "Prefer EXACTLY 1" in txt
+    assert "same file" in txt
+    assert "merge cost" in txt
+    assert "2..2" not in txt
 
 
 def test_validate_accepts_single_subtask_when_max_sub_1():
@@ -38,11 +45,43 @@ def test_validate_accepts_single_subtask_when_max_sub_1():
     assert not ok2
 
 
-def test_validate_still_requires_two_plus_when_max_sub_above_1():
-    ok, _ = P._validate_mission_plan(_plan_with(1), 3)
-    assert not ok
-    ok2, msg2 = P._validate_mission_plan(_plan_with(3), 3)
+def test_validate_accepts_one_or_two_and_rejects_more_than_budget():
+    ok1, msg1 = P._validate_mission_plan(_plan_with(1), 2)
+    assert ok1, msg1
+    ok2, msg2 = P._validate_mission_plan(_plan_with(2), 2)
     assert ok2, msg2
+    ok3, _ = P._validate_mission_plan(_plan_with(3), 2)
+    assert not ok3
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_two_worker_candidate_accepts_planner_return_of_one_or_two(
+        monkeypatch, count):
+    planner = P()
+    mission = {
+        "mission_id": "M-TEST",
+        "budgets": {"max_subtasks": 2},
+    }
+    monkeypatch.setattr(
+        planner, "_call_decompose", lambda *_args: _plan_with(count))
+
+    plan = planner.plan_decompose(mission, "DECOMP-M-TEST")
+
+    assert len(plan.subtasks) == count
+
+
+def test_two_worker_candidate_rejects_planner_return_above_two(monkeypatch):
+    planner = P()
+    mission = {
+        "mission_id": "M-TEST",
+        "budgets": {"max_subtasks": 2},
+    }
+    monkeypatch.setattr(
+        planner, "_call_decompose", lambda *_args: _plan_with(3))
+    monkeypatch.setattr("loopcore.planner_adapter.time.sleep", lambda _s: None)
+
+    with pytest.raises(RuntimeError, match="subtasks must be a list of 1..2"):
+        planner.plan_decompose(mission, "DECOMP-M-TEST")
 
 
 def test_schema_allows_single_subtask_plan():

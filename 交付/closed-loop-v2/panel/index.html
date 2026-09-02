@@ -111,7 +111,7 @@ math2.py
 tests/**</textarea>
       <label>最大子任务数 / 给 Planner 的总体指令</label>
       <div style="display:flex;gap:8px">
-        <input id="f_sub" type="number" value="2" style="width:70px">
+        <input id="f_sub" type="number" min="1" max="2" value="1" style="width:70px">
         <input id="f_instr" placeholder="测试全绿即完成；禁止改 tests/">
       </div>
     </div>
@@ -387,7 +387,7 @@ $("btnCfg").onclick = ()=> fetch("/api/config",{method:"POST",
 $("btnStart").onclick = ()=>{
   const body = {objective:$("f_obj").value, acceptance_criteria:$("f_ac").value,
     allowed_paths:$("f_paths").value, gate_commands:$("f_gate").value,
-    max_subtasks:+$("f_sub").value||2, user_instruction:$("f_instr").value};
+    max_subtasks:Number($("f_sub").value), user_instruction:$("f_instr").value};
   fetch("/api/mission",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)}).then(r=>r.json()).then(d=>{
       if(d.ok){ toast("已启动 "+d.mission_id); $("newMission").classList.remove("open"); }

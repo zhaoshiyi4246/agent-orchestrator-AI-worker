@@ -36,8 +36,10 @@ from loopcore.auditor import CodexCliAuditorProvider         # noqa: E402
 from loopcore.bus import BusConfig, LoopBus                  # noqa: E402
 from loopcore.bus_projector import StoreBusProjector         # noqa: E402
 from loopcore.memory import ProjectMemory                    # noqa: E402
-from loopcore.mission import MISSION_TERMINAL, MissionController  # noqa: E402
-from loopcore.mission_contracts import MissionSpec           # noqa: E402
+from loopcore.mission import (MISSION_TERMINAL, MissionController,
+                              deterministic_single_task_plan)  # noqa: E402
+from loopcore.mission_contracts import (MissionSpec,
+                                        new_mission_max_subtasks)  # noqa: E402
 from loopcore.mission_gate import IntegrationGate            # noqa: E402
 from loopcore.planner_adapter import CodexCliPlannerProvider       # noqa: E402
 from loopcore.state_store import StateStore                  # noqa: E402
@@ -298,18 +300,20 @@ def main() -> int:
                 raise ValueError("allowed_paths must be non-empty")
             if not mission.acceptance_criteria:
                 raise ValueError("acceptance_criteria must be non-empty")
-            max_subtasks = int(
-                (mission.budgets or {}).get("max_subtasks", 5) or 5)
-            if max_subtasks < 1:
-                raise ValueError("budgets.max_subtasks must be positive")
-            planner = build_planner(cfg, timeout=180, cwd=ROOT)
-            plan = planner.plan_decompose(
-                mission.to_dict(), "DECOMP-%s" % mission.mission_id)
+            max_subtasks = new_mission_max_subtasks(mission.budgets)
+            if max_subtasks == 1:
+                planner = None
+                plan = deterministic_single_task_plan(mission)
+            else:
+                planner = build_planner(cfg, timeout=180, cwd=ROOT)
+                plan = planner.plan_decompose(
+                    mission.to_dict(), "DECOMP-%s" % mission.mission_id)
             summary = {
                 "mission_id": mission.mission_id,
                 "dry_run": True,
-                "planner_provider": type(planner).__name__,
-                "model": planner.model,
+                "planner_provider": (type(planner).__name__
+                                     if planner is not None else None),
+                "model": planner.model if planner is not None else None,
                 "subtask_count": len(plan.subtasks),
                 "plan": plan.to_dict(),
             }

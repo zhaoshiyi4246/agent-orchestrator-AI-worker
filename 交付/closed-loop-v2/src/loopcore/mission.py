@@ -5,8 +5,8 @@ there is deliberately NO coordinator agent):
 
     user --one instruction--> MissionSpec
        |
-    Planner.plan_decompose()          (once; 2..max_subtasks subtasks,
-                                       exactly 1 when max_subtasks=1)
+    max_subtasks=1 -> deterministic MissionPlan (no decomposition LLM)
+    max_subtasks=2 -> Planner.plan_decompose() (returns 1 or 2 subtasks)
        |
     N x ClosedLoop (one per subtask, each with its own ao-spawned worker,
                     per-worker frozen base, budgets, audit->planner loop,
@@ -35,7 +35,9 @@ from .action_executor import ActionExecutor
 from .ao_adapter import AOAdapter, AOError
 from .auditor import AuditorProvider
 from .closed_loop import ClosedLoop
-from .mission_contracts import (MissionPlan, MissionSpec, ProjectState, TaskSpec)
+from .mission_contracts import (MissionPlan, MissionSpec, ProjectState,
+                                SubtaskPlan, TaskSpec,
+                                new_mission_max_subtasks)
 from .mission_gate import IntegrationGate
 from .event_observer import Observer
 from .planner_adapter import PlannerProvider
@@ -44,6 +46,22 @@ from .verifier import VerifierInput, VerifierProvider
 from .event_normalizer import now_iso, make_id, _epoch_seconds
 
 MISSION_TERMINAL = ("MISSION_DONE", "HUMAN", "FAILED")
+
+
+def deterministic_single_task_plan(mission: MissionSpec) -> MissionPlan:
+    """Build the standard one-lane plan used when no decomposition is needed."""
+    return MissionPlan(
+        mission_id=mission.mission_id,
+        strategy="deterministic single-worker plan",
+        subtasks=[SubtaskPlan(
+            subtask_id="%s-S1" % mission.mission_id,
+            objective=mission.objective,
+            allowed_paths=list(mission.allowed_paths),
+            acceptance_criteria=list(mission.acceptance_criteria),
+            gate_commands=list(mission.gate_commands),
+            dependencies=[],
+        )],
+    )
 
 
 class MissionController:
@@ -368,11 +386,15 @@ class MissionController:
 
     def _decompose(self) -> None:
         try:
-            plan = self.planner.plan_decompose(
-                self.mission.to_dict(),
-                "DECOMP-%s" % self.mission.mission_id)
+            max_subtasks = new_mission_max_subtasks(self.mission.budgets)
+            if max_subtasks == 1:
+                plan = deterministic_single_task_plan(self.mission)
+            else:
+                plan = self.planner.plan_decompose(
+                    self.mission.to_dict(),
+                    "DECOMP-%s" % self.mission.mission_id)
         except Exception as e:  # noqa
-            self._set_state("HUMAN", "decomposition failed twice: %s" % e)
+            self._set_state("HUMAN", "new mission decomposition rejected: %s" % e)
             return
         # Stopped while the planner was thinking: drop the plan entirely and
         # keep the HUMAN row untouched — the next resume re-decomposes.

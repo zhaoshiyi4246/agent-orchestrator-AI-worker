@@ -39,9 +39,11 @@ Panel / run_mission
 | Observer | 确定性程序；无模型 |
 | Integration Gate | 确定性程序；无模型 |
 
-Auditor、Verifier 和 Observer 都不直接向 Worker 下发自动执行指令。当前系统
-仍允许多个子任务；默认单 Worker、按需第二 Worker 仍待后续收敛。VerifierProvider
-仍是正式角色；高风险子任务的显式按需策略尚未实现。
+Auditor、Verifier 和 Observer 都不直接向 Worker 下发自动执行指令。新 Mission
+默认 `max_subtasks=1` 并由 Controller 确定性生成唯一 S1，不调用 decomposition
+Planner；Panel 只接受 1 或 2。显式选择 2 时 Planner 可以返回 1 或 2，且只应在
+存在真实独立并行收益时启用第二 Worker。历史持久化计划即使已有更多 task 仍可
+hydrate。VerifierProvider 仍是正式角色；高风险子任务的显式按需策略尚未实现。
 
 当前正常路径为：
 
@@ -86,6 +88,7 @@ closed-loop-v2/               当前主产品候选
   config/default.yaml         当前运行配置
   schemas/                    JSON Schema
   tasks/mission-quick.json    当前 Codex dry-run 示例
+  tasks/e2e-smoke.json        固定标准 E2E 输入（不自动执行）
   run_mission.py              CLI 与运行时组装入口
   启动面板.bat                 面板启动入口
   tests/                      v0.2 自动化测试
@@ -118,7 +121,7 @@ bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完�
 当前已实现：
 
 - Panel 发起 Mission；
-- Planner 自动分解；
+- 单 Worker Mission 确定性规划；双 Worker 候选才调用 Planner 分解；
 - Panel/CLI 的 AO Codex Worker 执行；
 - Observer 确定性观察；
 - 证据不足或异常时的 Auditor → Planner 闭环；
@@ -129,9 +132,10 @@ bootstrap/安装脚本、AO 首次配置 UX、Project 注册与选择仍未完�
 仍待后续：
 
 - Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
-- gate-first happy path 已实现，合并当前 PR 后待一次同题真实性能 E2E；
-- 默认 1 个 Worker、按需最多 2 个，以及隐藏或显式标记
-  `auto_ff_master` 为实验性高风险功能，仍待后续；
+- gate-first happy path 与 event-freshness 修复已完成；
+- 默认 1 个 Worker、按需最多 2 个已完成；本 PR 审计合并后可用固定
+  `tasks/e2e-smoke.json` 运行一次标准 GUI E2E；
+- 隐藏或显式标记 `auto_ff_master` 为实验性高风险功能仍待后续；
 - 比赛行为收敛后再做重复模块和旧入口清理；
 - 最后完成 clean delivery、installer/bootstrap、AO first-run 和 CI 收尾；
 - fingerprint/source 与 thread revision 继续保持低优先级。
@@ -160,9 +164,9 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 .\.venv\Scripts\python.exe .\run_mission.py .\tasks\mission-quick.json --dry-run
 ```
 
-`--dry-run` 是 Planner 分解预检：它会调用真实 Codex Planner，但不连接 AO、
-不创建 Worker、不创建 StateStore 或 runtime。真实运行还需要 AO daemon 在线，
-且目标 Project 已在 AO 注册。
+`--dry-run` 不连接 AO，也不创建 Worker、StateStore 或 runtime；
+`max_subtasks=1` 时输出确定性计划且不调用模型，值为 2 时才调用真实只读 Codex
+Planner。真实运行还需要 AO daemon 在线，且目标 Project 已在 AO 注册。
 
 测试数量以 CI 或当前真实命令输出为准，不在交付说明中冻结。
 

@@ -210,8 +210,10 @@ class CodexCliPlannerProvider(PlannerProvider):
         controller's existing boundary halts to HUMAN).
         """
         from .mission_contracts import MissionPlan
-        max_sub = max(1, int((mission.get("budgets") or {})
-                             .get("max_subtasks", 5) or 5))
+        max_sub = int((mission.get("budgets") or {})
+                      .get("max_subtasks", 1))
+        if max_sub < 1:
+            raise ValueError("budgets.max_subtasks must be positive")
         last_err = ""
         for attempt in range(2):
             try:
@@ -236,8 +238,13 @@ class CodexCliPlannerProvider(PlannerProvider):
                     "trivial decomposition: one worker lane executes the "
                     "whole mission) ")
         else:
-            head = ("Decompose this mission into 2..%d parallel subtasks "
-                    % max_sub)
+            head = ("Return 1..%d subtasks. Prefer EXACTLY 1 subtask. Use a "
+                    "second worker only when allowed_paths split naturally "
+                    "without overlap, acceptance criteria are independent, "
+                    "there is no strong cross-task dependency, and it gives "
+                    "real parallel benefit. If the mission is small, changes "
+                    "the same file, is strongly coupled, or splitting only "
+                    "adds merge cost, you MUST return 1 subtask " % max_sub)
         return (head +
                 "and output ONLY a MissionPlan JSON object. Prefer DISJOINT "
                 "allowed_paths across subtasks (avoids merge conflicts); "
@@ -266,10 +273,8 @@ class CodexCliPlannerProvider(PlannerProvider):
         if not isinstance(obj, dict):
             return False, "not an object"
         subs = obj.get("subtasks")
-        lo = 1 if max_sub <= 1 else 2
-        if not isinstance(subs, list) or not (lo <= len(subs) <= max_sub):
-            return False, ("subtasks must be a list of %d..%d"
-                           % (lo, max_sub))
+        if not isinstance(subs, list) or not (1 <= len(subs) <= max_sub):
+            return False, ("subtasks must be a list of 1..%d" % max_sub)
         ids = set()
         for s in subs:
             if not isinstance(s, dict) or not s.get("subtask_id"):

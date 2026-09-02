@@ -48,15 +48,18 @@ Worker 指令：MissionController → ActionExecutor → AO
 
 | 角色或程序 | 当前运行形态 | 默认模型 | 当前职责 |
 |---|---|---|---|
-| Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 自动拆解、接收证据并裁决；不直接编辑代码 |
+| Planner | 1 个项目级唯一的 headless Codex CLI Provider | `gpt-5.6-sol` | 仅在允许第二 Worker 时按需拆解，并接收证据裁决；不直接编辑代码 |
 | Auditor | 1 个只读 headless Codex CLI Provider | `gpt-5.6-sol` | 语义审计，只向 Planner 提交结果，不直接控制 Worker |
 | Verifier | 独立只读 headless Codex CLI Provider | `gpt-5.6-sol` | 新 Mission 正常路径只在 Mission 终局调用；历史 `VERIFIER_PENDING` Task 恢复仍可调用 |
 | Worker | AO Chat-mode Codex Worker，harness=`codex` | `gpt-5.6-sol` | 在 AO worktree 中执行边界明确的编码任务 |
 | Observer | 确定性程序 | no model | 从 AO 事实产生触发和证据 |
 | Integration Gate | 确定性程序 | no model | 运行显式 argv 门禁并记录稳定证据 |
 
-当前系统允许一个 Mission 拆出多个子任务；“默认 1 个 Worker、确有独立并行收益
-时最多 2 个”仍是后续收敛目标，不是当前实现不变量。
+新 Mission 默认 `max_subtasks=1`。该值为 1 时，`MissionController` 确定性生成
+唯一 `<mission-id>-S1` 标准计划，不调用 decomposition Planner；用户显式选择 2
+时，Planner 可以返回 1 或 2 个子任务，并应优先单任务，只有存在真实独立并行
+收益才启用第二 Worker。Panel 只接受 1 或 2，不会把越界值静默 clamp。历史已
+持久化计划（包括多于 2 个 task）仍按原计划 hydrate，不重新分解。
 
 证据充分的首次普通 Task completion 采用 deterministic gate-first：Worker 必须
 明确 idle/waiting_input/needs_input/exited/terminated、无 pending approval、无本
@@ -92,7 +95,7 @@ Mission Verifier 是新 Mission 默认唯一的正常路径 Verifier 调用。Ve
 ## 当前已经实现
 
 - Panel 发起 Mission，CLI 与 Panel 复用同一运行时组装路径；
-- Planner 自动分解；
+- 单 Worker Mission 确定性规划；仅双 Worker 候选调用 Planner 分解；
 - AO Codex Worker 执行，Panel 与 CLI 均使用 `codex` harness；
 - Observer 确定性观察；
 - 证据不足或异常时由 Auditor 向 Planner 提交审计结果并形成闭环；
@@ -119,11 +122,12 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 ## 后续顺序
 
 1. Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
-2. gate-first happy path 已实现，合并当前 PR 后运行一次同题真实性能 E2E；
-3. 默认 1 个 Worker、确有必要时最多 2 个，以及隐藏或明确标记
-   `auto_ff_master` 为实验性高风险功能，仍待后续；
-4. 再生成主路径引用图并清理重复模块和旧入口；
-5. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
+2. gate-first happy path 与 event-freshness 修复已完成；
+3. 新 Mission 默认 1 个 Worker、按需最多 2 个已完成；下一次审计合并后可使用
+   `tasks/e2e-smoke.json` 做一次标准 GUI E2E；
+4. 隐藏或明确标记 `auto_ff_master` 为实验性高风险功能仍待后续；
+5. 再生成主路径引用图并清理重复模块和旧入口；
+6. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
 
 fingerprint 去 source 和 thread revision 继续作为低优先级治理项，不阻塞比赛
 行为收敛。
@@ -166,9 +170,10 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 .\.venv\Scripts\python.exe .\panel\server.py
 ```
 
-`--dry-run` 会真实调用一次只读、ephemeral 的 Codex Planner，但不会连接 AO、
-创建 Worker、StateStore 或 runtime 目录。真实 Mission 运行需要 AO daemon 和
-已注册 Project。
+`--dry-run` 不会连接 AO、创建 Worker、StateStore 或 runtime 目录；
+`max_subtasks=1` 时直接输出确定性单任务计划且不调用模型，值为 2 时才调用一次
+只读、ephemeral 的 Codex Planner。真实 Mission 运行需要 AO daemon 和已注册
+Project。`tasks/e2e-smoke.json` 是固定回归输入，不会被自动执行。
 
 测试数量以 CI 或当前真实命令输出为准，不在用户文档中冻结。
 

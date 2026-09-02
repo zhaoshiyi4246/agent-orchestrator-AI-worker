@@ -45,13 +45,16 @@ config/default.yaml
 schemas/
 prompts/
 tasks/mission-quick.json
+tasks/e2e-smoke.json       固定标准 E2E 输入（不自动执行）
 tests/
 ```
 
 ## 当前边界
 
-- 当前系统允许一个 Mission 拆分为多个子任务；默认单 Worker、按需第二 Worker
-  是 R3 目标。
+- 新 Mission 默认 `max_subtasks=1`：Controller 确定性生成唯一 S1，不调用
+  decomposition Planner。Panel 只接受 1 或 2；显式选择 2 时 Planner 可返回
+  1 或 2，默认优先 1，仅在有真实独立并行收益时使用第二 Worker。越界的新 Mission
+  明确拒绝；历史已持久化的 2-task 或更多 task 计划仍可恢复。
 - 证据充分的首次普通 Task completion：`Worker idle → deterministic Task Gate →
   DONE`。资格要求为 `WORKER_RUNNING`、明确
   idle/waiting_input/needs_input/exited/terminated、无 pending
@@ -81,4 +84,5 @@ $env:PYTHONPATH = (Resolve-Path ".\src").Path
 .\.venv\Scripts\python.exe .\run_mission.py .\tasks\mission-quick.json --dry-run
 ```
 
-当前 `main` 基线在 R1-3 验证时为 **295 passed**；以后以 CI/当前测试输出为准。
+`--dry-run` 在 `max_subtasks=1` 时输出确定性计划且不调用模型；值为 2 时才调用
+只读、ephemeral 的 Codex Planner。测试数量以 CI 或当前真实命令输出为准。
