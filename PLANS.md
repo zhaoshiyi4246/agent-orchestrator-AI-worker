@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R2 duplicate / legacy convergence
-- 当前任务：R2-1 Batch 2B — retire legacy supervision CLI
-- 当前状态：Batch 2B 仅删除无 production caller 的 `cli.py` 与专用 legacy `test_watch_fresh_only_once.py`；不迁移 Snapshot/watch/SSE/JSONL sidecar，保留相关底层模块供后续独立审计；entrypoint 定向回归 26 项、完整离线 387 项、compileall 与 diff-check 均通过
-- 下一步：单独处理 `protocol.py` contract retirement；不在 Batch 2B 顺手删除其它暂时无调用 symbol 或模块
+- 当前任务：R2-1 Protocol Retirement — remove obsolete AO Chat wire contract
+- 当前状态：Protocol Retirement Audit 已通过；删除无 production/test caller 的 legacy v2 `protocol.py`，不增加 compatibility shim，保留 `clao-src` 独立历史副本；完整离线 387 项、compileall 与 diff-check 均通过
+- 下一步：进入 AO Client / old Observer island audit；不在 protocol retirement 中处理旧 Client、Observer 或 Gate
 
 ## 一、更新规则
 
@@ -30,7 +30,7 @@
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
-| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；Batch 1/2A/2B 小批次收敛） |
+| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；Batch 1/2A/2B 与 protocol retirement 小批次收敛） |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 进行中（Project selector） |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
@@ -443,7 +443,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 |---|---|---|---|
 | K1 | 旧架构文档与代码主路径不一致 | R1 | 已解决：当前 README、交付说明、架构文档、PROJECT 和前端均与真实主路径一致 |
 | K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
-| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 部分收敛：v2 三套 legacy CLI 已退休；旧 Client/Observer/Gate 与协议继续分批审计 |
+| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 部分收敛：v2 三套 legacy CLI 与旧 AO Chat protocol 已退休；旧 Client/Observer/Gate 继续分批审计 |
 | K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已解决：新 Mission 默认 1；值为 1 时确定性单 lane 且不调用 decomposition Planner；显式选择 2 时 Planner 可返回 1 或 2 |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
@@ -483,7 +483,7 @@ workspace API PR 中以 AO 官方 loopback endpoint 取代 Worker workspace 内�
 推导。Competition behavior 主路径和 Project selector 完成后，当前工作已切回
 duplicate / legacy convergence。删除前仍必须有测试和入口证据。
 
-#### R2-1 Reference Graph Audit、Batch 1、Batch 2A 与 Batch 2B
+#### R2-1 Reference Graph Audit、Batch 1、Batch 2A、Batch 2B 与 Protocol Retirement
 
 Reference Graph Audit 已完成并确认 `llm_env.py` 从 `run_mission.py`、
 `panel/server.py` 与 Controller production roots 不可达；生产 Planner、Auditor、
@@ -519,6 +519,16 @@ projector high-water/idempotency 覆盖。entrypoint 静态回归扩展为要求
 CLI source 均不存在，并只依赖正式入口声明而不逐字绑定新的退休说明。下一步单独
 处理 `protocol.py` contract retirement。Batch 2B 的 entrypoint 定向回归 26 项、
 完整离线 387 项、compileall 与 `git diff --check` 均通过。
+
+Protocol Retirement Audit 已确认 legacy v2 `src/loopcore/protocol.py` 没有
+production/test、schema、prompt、fixture 或当前公开兼容消费者。当前
+Planner/Auditor/Verifier 使用 headless Codex CLI Provider，通过 Python objects 与
+JSON schemas 同 Controller 交互，不通过 AO Chat 交换旧 camelCase DTO。本批仅删除
+该 v2 source，不增加 compatibility shim、re-export、wrapper、alias 或 DTO converter；
+`clao-src` 自己的历史 `protocol.py` 与 callers 保持不变。`integration_gate.py`
+docstring 中的 `AuditRequest` 是明确 deferred legacy hit，留待旧 Gate 独立审计。
+完整离线测试为 `387 passed in 72.99s`；compileall 与 `git diff --check` 均退出
+0。下一步进入 AO Client / old Observer island audit。
 
 ### R3
 
@@ -564,8 +574,9 @@ R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；Verifier final-only、gate-
 event freshness、默认单 Worker、自动 SCM 副作用移除与 R4 Project selector 均已
 完成；核心 single-worker 标准 smoke 已通过。当前 R2 Batch 2A 仅退休两个损坏的
 legacy Mission/ClosedLoop CLI，Batch 2B 继续退休 legacy supervision CLI；两批均不
-运行 AO Worker、Codex live、Mission 或 E2E。下一步独立处理 `protocol.py`
-contract retirement；其余配置/高风险边界、重复模块清理与 clean delivery/
+运行 AO Worker、Codex live、Mission 或 E2E。Protocol retirement 继续删除无 caller
+的旧 AO Chat wire contract。下一步进入 AO Client / old Observer island audit；
+其余配置/高风险边界、重复模块清理与 clean delivery/
 installer/first-run 继续分批推进。
 
 ## 十二、停止条件
