@@ -16,6 +16,8 @@ from panel import server as panel_server
 
 SERVER = Path(__file__).resolve().parents[1] / "panel" / "server.py"
 INDEX = SERVER.with_name("index.html")
+PRODUCT_ROOT = SERVER.parents[1]
+PROJECT_DOC = PRODUCT_ROOT.parents[1] / "docs" / "PROJECT.md"
 
 
 def _start_panel_mission(monkeypatch, tmp_path, max_subtasks=...):
@@ -152,6 +154,19 @@ def test_panel_and_cli_share_build_runtime():
 
     assert calls_build_runtime(panel_tree, "start_mission")
     assert calls_build_runtime(runner_tree)
+
+
+def test_retired_legacy_cli_entrypoints_stay_out_of_product_roots():
+    loopcore = PRODUCT_ROOT / "src" / "loopcore"
+    project_text = PROJECT_DOC.read_text(encoding="utf-8")
+
+    assert not (loopcore / "mission_cli.py").exists()
+    assert not (loopcore / "closed_loop_cli.py").exists()
+    assert (PRODUCT_ROOT / "run_mission.py").is_file()
+    assert SERVER.is_file()
+    assert "仍可作为旧的监督、单任务和 Mission 兼容入口运行" not in project_text
+    assert ("`mission_cli.py` 与 `closed_loop_cli.py` 已在 R2 Batch 2A 退休"
+            in project_text)
 
 
 def test_panel_omitted_max_subtasks_defaults_to_one(monkeypatch, tmp_path):
