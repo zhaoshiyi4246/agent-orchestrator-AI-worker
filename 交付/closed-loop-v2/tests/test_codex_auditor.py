@@ -1,6 +1,7 @@
 """Offline Codex Auditor migration tests."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,14 @@ from loopcore.auditor import (
 )
 from loopcore.codex_cli import CodexCliError
 from loopcore.mission_contracts import AuditDecision
+
+
+def test_auditor_provider_does_not_set_anthropic_model(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    CodexCliAuditorProvider()
+
+    assert "ANTHROPIC_MODEL" not in os.environ
 
 
 def _bundle(failed=None):

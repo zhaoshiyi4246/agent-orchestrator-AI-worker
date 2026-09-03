@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
+- 状态：R1 与 R2-0 主链已完成；R2 duplicate / legacy convergence 已恢复，Reference Graph Audit 已完成且 Batch 1 已删除 `llm_env.py`；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -113,10 +113,11 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   和 `CodexCliVerifierProvider`；三者复用 `codex_cli.run_codex_json()`，以
   stdin、`--ephemeral`、`--sandbox read-only`、各自现有输出 schema 和
   `--output-last-message` 调用 Codex CLI，默认模型均为可配置的
-  `gpt-5.6-sol`。生产主路径不再要求 Claude CLI、`ANTHROPIC_MODEL` 或 GLM
-  网关，也不再调用 `llm_env.ensure_llm_env()`。`llm_env.py` 与旧 Provider
-  类名仅作为待 R2 调用关系审计的兼容遗留；旧类名是 Codex Provider 的简单别名，
-  不保留第二套 Claude 生产实现。
+  `gpt-5.6-sol`。R2 Reference Graph Audit 已证明 `llm_env.py` 从 production
+  roots 不可达，Batch 1 已将其删除。当前 LLM role boundary 只有
+  `codex_cli.run_codex_json()` 与三个 Codex Provider，不要求 Claude CLI、
+  `ANTHROPIC_MODEL`、GLM gateway 或 `CLAUDE_CODE_GIT_BASH_PATH`。旧 Provider
+  类名只是 Codex Provider 的简单兼容别名，不保留第二套 Claude 生产实现。
 - Worker 由 `ActionExecutor` 调用 `ao.exe spawn --kind worker` 创建，并通过
   `ao send`、`ao session kill` 管理。R1-3 在 AO Desktop `0.12.9` 上验证的真实
   harness 值为 `codex`，Chat 接口使用 `--mode chat`，模型通过
@@ -247,10 +248,11 @@ exception 则由 `ClosedLoop.step()` / `MissionController.step()` 现有连续�
 `consecutive loop errors` 转 HUMAN。该路径属于 MissionController 直接组装的 `ClosedLoop`
 控制层，不是第二个控制平面。R3 将决定保留该 fast path，还是统一路由 Planner。
 
-`llm_env.py`、旧 Provider 类名兼容别名、旧审批回归注释，以及
+R2 Reference Graph Audit 已证明 `llm_env.py` 从 production roots 不可达，Batch 1
+已将其删除。旧 Provider 类名兼容别名、旧审批回归注释，以及
 `tasks/mission-quick-002.json` 至 `mission-quick-014.json` 中的旧 harness 字符串
-属于兼容或历史运行证据，不进入当前默认生产组装路径。R2 将在引用关系证明后
-决定保留、隔离或删除；R1-4 不机械改名或改写历史证据。
+仍属于兼容或历史运行证据，不进入当前默认生产组装路径；后续 R2 小批次继续按
+引用证据决定保留、隔离或删除，不机械改名或改写 R1 历史证据。
 
 ### 3. Store、Bus、投影和用户指令
 
@@ -314,8 +316,9 @@ AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
 - competition Panel 已删除 `auto_ff_master` 状态、UI、完成分支和旧
   `ff_master_to_integration()` helper；旧客户端发送 legacy `false` 可忽略，发送
   `true` 会明确拒绝。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；
-- `llm_env.py`、旧 AO Client/CLI 和依赖 `AO_DATA_DIR` 的测试夹具仍是 R2
-  待审计兼容或历史边界，本轮未删除或改写。
+- R2 Reference Graph Audit 已完成；production-unreachable 的 `llm_env.py` 已在
+  Batch 1 删除。旧 AO Client/CLI 和依赖 `AO_DATA_DIR` 的测试夹具仍按后续 R2
+  小批次单独审计，不在本批次删除或改写。
 
 PR #6 的 live probe 曾从默认 runfile 解析到 daemon endpoint，`get_projects()`
 与 `ao status --json` 均成功，且未创建 Worker。本 workspace API 任务的离线
@@ -593,8 +596,9 @@ UI → 绕过 MissionController 改状态
 
 - R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
-- R2：R2-0 先修复 AO 主运行路径可移植性；重复模块、旧入口和参考代码清理延后
-  到比赛行为收敛之后；
+- R2：R2-0 已修复 AO 主运行路径可移植性；Reference Graph Audit 已完成，
+  duplicate / legacy convergence 已恢复，Batch 1 仅删除 `llm_env.py`；其它重复模块、
+  旧入口和参考代码继续按审计证据拆成独立小批次；
 - R3：Competition behavior convergence 已启动；Verifier final-only、gate-first、
   event freshness 与默认 Worker 1/按需最多 2 已完成，标准 smoke
   `MISSION-E2E-SMOKE-20260902-204459` 已通过；自动 master/main merge 与 origin
@@ -604,10 +608,10 @@ UI → 绕过 MissionController 改状态
 - R5：CI、全新安装、真实 Demo 与干净交付。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
-R4 Project selector 已完成。后续剩余 R4 边界、重复模块清理和 clean
-delivery/installer/first-run 仍按独立任务推进。本 Project selector 任务不运行真实
-AO Worker/E2E；本轮不改变异常 Auditor/Planner、retry、alert/L0 或 Mission final
-验证语义，也不立即开始 R2-1。
+R4 Project selector 已完成。当前工作已切回 R2 duplicate / legacy convergence；
+Reference Graph Audit 已完成，Batch 1 只删除 production-unreachable 的
+`llm_env.py`。后续 R2 小批次与剩余 R4 边界、clean delivery/installer/first-run
+仍分别推进，不改变异常 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 
 ## 十、明确非目标
 

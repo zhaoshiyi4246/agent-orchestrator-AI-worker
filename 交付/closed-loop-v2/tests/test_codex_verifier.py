@@ -1,12 +1,21 @@
 """Offline Codex Verifier migration tests."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from loopcore.codex_cli import CodexCliError
 from loopcore.verifier import CodexCliVerifierProvider, VerifierInput
+
+
+def test_verifier_provider_does_not_set_anthropic_model(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+
+    CodexCliVerifierProvider()
+
+    assert "ANTHROPIC_MODEL" not in os.environ
 
 
 def _input():
