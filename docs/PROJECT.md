@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；R2 duplicate / legacy convergence 已恢复，Reference Graph Audit 已完成，Batch 1 已删除 `llm_env.py`，Batch 2A 已退休损坏的 Mission/ClosedLoop legacy CLI；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
+- 状态：R1 与 R2-0 主链已完成；R2 duplicate / legacy convergence 已恢复，Reference Graph Audit 已完成，Batch 1 已删除 `llm_env.py`，Batch 2A/2B 已退休三套 legacy CLI；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -75,10 +75,11 @@ run_mission.py main()
 
 `panel/server.py` 没有第二套 Controller，但它自行实现轮询循环，没有调用
 `run_mission.run_loop()`。正式运行入口只有 Panel 与 `run_mission.py`；
-`mission_cli.py` 与 `closed_loop_cli.py` 已在 R2 Batch 2A 退休，两者没有生产或
-测试消费者。`loopcore.cli` 暂时保留为等待独立 retirement 的 legacy supervision
-utility，不是 production entrypoint，也不是当前支持入口。`protocol.py` 与旧 AO
-Client/Observer/Gate 继续按后续独立小批次审计。
+`mission_cli.py` 与 `closed_loop_cli.py` 已在 R2 Batch 2A 退休，`cli.py` 已在
+Batch 2B 退休。v0.2 不再维护独立 supervision/watch CLI。AO events 由正式
+MissionController/ClosedLoop 路径读取并写入 StateStore，再由 StoreBusProjector、
+UI、Markdown 与 JSONL 提供派生视图。`protocol.py` 与旧 AO Client/Observer/Gate
+继续按后续独立小批次审计。
 
 R2-0 后，Panel 与 `run_mission.py` CLI 继续复用同一个 `build_runtime()`，并共享同一份 AO
 运行时解析结果。AO Desktop 是外部依赖：CL-AO 不携带、不安装也不自动启动
@@ -261,6 +262,12 @@ Legacy CLI Retirement Audit 进一步证明 `mission_cli.py` 与
 Mission 路径覆盖；两者已在 R2 Batch 2A 退休，没有把 `_wire_jsonl`、独立
 ClosedLoop runner、旧 AO 路径或旧环境假设迁入 `run_mission.py`。
 
+Batch 2B 已继续退休无 production caller 的 `cli.py` 及其专用
+`test_watch_fresh_only_once.py`。该测试只验证旧 Snapshot/watch JSONL 实现，不是
+当前 event-freshness contract；现有 shared routing、per-worker sequence cursor、
+持久化 `StateStore.event_seen()` 与 Bus projector high-water/idempotency 测试继续
+覆盖正式路径。Snapshot、watch/SSE loop 和独立 JSONL writer 均未迁移。
+
 ### 3. Store、Bus、投影和用户指令
 
 `StateStore` 是当前 Controller 的持久化状态源。它保存 Mission/Task、状态迁移、
@@ -294,10 +301,10 @@ panel /api/directive
 | 组 | Panel / `run_mission.py` / Controller 主路径 | 其他实际引用 | R2 候选处置 |
 |---|---|---|---|
 | `ao_adapter.py` / `ao_client.py` | 使用 `ao_adapter.py`；`ao_client.py` 未进入主路径 | `ao_client.py` 只被旧 `observer.py` 导入 | 保留 Adapter；证明兼容需求后隔离或删除旧 Client/Observer 组合 |
-| `event_observer.py` / `observer.py` | 使用 `event_observer.Observer` | `event_observer.py` 也被兼容 CLI 和大量测试使用；`observer.py` 无运行入口引用 | 保留前者；后者与 CL-AO 来源一起审计 |
+| `event_observer.py` / `observer.py` | 使用 `event_observer.Observer` | `event_observer.py` 也被当前测试使用；`observer.py` 无运行入口引用 | 保留前者；后者与 CL-AO 来源一起审计 |
 | `mission_gate.py` / `integration_gate.py` | 使用 `mission_gate.IntegrationGate` | `mission_gate.py` 被当前 Controller 和测试使用；`integration_gate.py` 无运行入口引用 | 保留前者；后者与 CL-AO 来源一起审计 |
 | `mission_contracts.py` / `protocol.py` | 使用 `mission_contracts.py` | contracts 被当前模块和测试广泛使用；`protocol.py` 无运行入口引用 | 保留 contracts；确认无兼容消费者后隔离旧协议 |
-| `cli.py` / 已退休 legacy CLI / `run_mission.py` | 面板和当前 CLI 只走 `run_mission.py` | `mission_cli.py` 与 `closed_loop_cli.py` 已在 Batch 2A 退休；`cli.py` 仍有一项测试引用 | 保留 `run_mission.py`；`cli.py` 在独立 Batch 2B 审计退休 |
+| 已退休 legacy CLI / `run_mission.py` | 面板和当前 CLI 只走 `run_mission.py` | `mission_cli.py`、`closed_loop_cli.py` 与 `cli.py` 已分别在 Batch 2A/2B 退休 | `run_mission.py` 是唯一 CLI runner；v0.2 不再维护独立 supervision/watch CLI |
 
 `closed-loop-v2` 没有从 `clao-src` 或 `ao-supervision-sidecar` 做跨目录 import。
 文件哈希表明，v2 的 `observer.py`、`integration_gate.py`、`protocol.py` 与
@@ -325,8 +332,8 @@ AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
   `true` 会明确拒绝。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；
 - R2 Reference Graph Audit 已完成；production-unreachable 的 `llm_env.py` 已在
   Batch 1 删除，损坏且无消费者的 `mission_cli.py` 与 `closed_loop_cli.py` 已在
-  Batch 2A 退休。`loopcore.cli`、旧 AO Client/Observer/Gate 和依赖
-  `AO_DATA_DIR` 的测试夹具仍按后续 R2 小批次单独审计。
+  Batch 2A 退休，legacy supervision `cli.py` 已在 Batch 2B 退休。旧 AO
+  Client/Observer/Gate 和依赖 `AO_DATA_DIR` 的测试夹具仍按后续 R2 小批次单独审计。
 
 PR #6 的 live probe 曾从默认 runfile 解析到 daemon endpoint，`get_projects()`
 与 `ao status --json` 均成功，且未创建 Worker。本 workspace API 任务的离线
@@ -606,8 +613,8 @@ UI → 绕过 MissionController 改状态
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
 - R2：R2-0 已修复 AO 主运行路径可移植性；Reference Graph Audit 已完成，
   duplicate / legacy convergence 已恢复；Batch 1 删除 `llm_env.py`，Batch 2A 退休
-  `mission_cli.py` 与 `closed_loop_cli.py`；其它重复模块、旧入口和参考代码继续按
-  审计证据拆成独立小批次；
+  `mission_cli.py` 与 `closed_loop_cli.py`，Batch 2B 退休 `cli.py`；其它重复模块、
+  旧入口和参考代码继续按审计证据拆成独立小批次；
 - R3：Competition behavior convergence 已启动；Verifier final-only、gate-first、
   event freshness 与默认 Worker 1/按需最多 2 已完成，标准 smoke
   `MISSION-E2E-SMOKE-20260902-204459` 已通过；自动 master/main merge 与 origin
@@ -619,8 +626,8 @@ UI → 绕过 MissionController 改状态
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。当前工作已切回 R2 duplicate / legacy convergence；
 Reference Graph Audit 已完成，Batch 1 删除 production-unreachable 的 `llm_env.py`，
-Batch 2A 退休两个损坏且无消费者的 legacy CLI。下一步独立审计
-`loopcore.cli` retirement；其余 R2 小批次与剩余 R4 边界、clean
+Batch 2A/2B 已退休三个无 production caller 的 legacy CLI。下一步独立审计
+`protocol.py` contract retirement；其余 R2 小批次与剩余 R4 边界、clean
 delivery/installer/first-run 仍分别推进，不改变异常 Auditor/Planner、retry、
 alert/L0 或 Mission final 验证语义。
 
