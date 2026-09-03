@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R2 duplicate / legacy convergence
-- 当前任务：R2-1 Batch 1 — remove legacy `llm_env`
-- 当前状态：R2 Reference Graph Audit 已完成；Batch 1 仅删除 production-unreachable 的 `llm_env.py`，将 Auditor/Verifier 不设置 `ANTHROPIC_MODEL` 的当前 invariant 迁入各自 Provider 测试；两组定向测试各 8 项、完整离线 388 项与 compileall 均通过
-- 下一步：本 Batch 1 审计合并后，根据 Reference Graph Audit 结果决定下一小批 legacy cleanup；不在本任务处理其它 legacy 模块
+- 当前任务：R2-1 Batch 2A — retire broken legacy Mission / ClosedLoop CLIs
+- 当前状态：Reference Graph Audit 与 Legacy CLI Retirement Audit 已完成；Batch 2A 仅删除无生产/测试消费者的 `mission_cli.py` 与 `closed_loop_cli.py`，保留 `cli.py` 与 `protocol.py` 等待独立小批次；entrypoint 定向回归 26 项、完整离线 389 项、compileall 与 diff-check 均通过
+- 下一步：独立处理 `cli.py` 的 Snapshot/watch/SSE/JSONL retirement 与对应 legacy 测试；不在 Batch 2A 扩大范围
 
 ## 一、更新规则
 
@@ -30,7 +30,7 @@
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
-| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 workspace API；重复清理延后） |
+| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；Batch 1/2A 小批次收敛） |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 进行中（Project selector） |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
@@ -483,7 +483,7 @@ workspace API PR 中以 AO 官方 loopback endpoint 取代 Worker workspace 内�
 推导。Competition behavior 主路径和 Project selector 完成后，当前工作已切回
 duplicate / legacy convergence。删除前仍必须有测试和入口证据。
 
-#### R2-1 Reference Graph Audit 与 Batch 1
+#### R2-1 Reference Graph Audit、Batch 1 与 Batch 2A
 
 Reference Graph Audit 已完成并确认 `llm_env.py` 从 `run_mission.py`、
 `panel/server.py` 与 Controller production roots 不可达；生产 Planner、Auditor、
@@ -496,7 +496,20 @@ Batch 1 只删除 `src/loopcore/llm_env.py` 及其 legacy contract 测试，不�
 迁入对应 Provider 测试；Planner 的同类测试沿用既有覆盖。Auditor 与 Verifier 定向
 测试各 `8 passed`，完整离线基线为 `388 passed in 80.23s`，`compileall` 退出码为 0。
 本任务不运行 AO、Codex live probe、Mission 或 E2E，也不处理其它 legacy 模块。
-下一步根据本次审计结果决定下一小批 cleanup，不进行成组批量删除。
+
+Legacy CLI Retirement Audit 已确认 `mission_cli.py` 与 `closed_loop_cli.py` 从
+Panel、`run_mission.py` 和 Controller production roots 不可达，也没有测试消费者。
+Batch 2A 只删除这两个 leaf legacy entrypoint；不迁移 `_wire_jsonl`、独立
+ClosedLoop runner、`AO_DATA_DIR`、bundled AO path、`--worker-session` 或 legacy
+`--instruct`。`cli.py` 及其 `test_watch_fresh_only_once.py` 明确保留给独立 Batch 2B，
+`protocol.py` 保留给独立 contract retirement batch。
+
+本批在现有 Panel/entrypoint 测试中增加 1 项最小静态回归，验证两个 legacy source
+不存在、`run_mission.py` 与 `panel/server.py` 仍存在，并禁止恢复已删除 CLI 仍是
+兼容入口的 stale claim。定向测试为 `26 passed in 0.16s`，完整离线基线为
+`389 passed in 95.90s`；`python -m compileall -q src panel run_mission.py` 与
+`git diff --check` 均退出 0。当前 production source/Panel/runner 对
+`mission_cli`、`closed_loop_cli`、`_wire_jsonl` 的引用为 0；历史来源目录未修改。
 
 ### R3
 
@@ -540,9 +553,10 @@ Batch 1 只删除 `src/loopcore/llm_env.py` 及其 legacy contract 测试，不�
 
 R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；Verifier final-only、gate-first、
 event freshness、默认单 Worker、自动 SCM 副作用移除与 R4 Project selector 均已
-完成；核心 single-worker 标准 smoke 已通过。本 Project selector PR 不运行真实 AO
-Worker/GUI E2E，也不启动 R2 删除。后续仍按独立任务处理剩余配置/高风险边界、
-重复模块清理与 clean delivery/installer/first-run。
+完成；核心 single-worker 标准 smoke 已通过。当前 R2 Batch 2A 仅退休两个损坏的
+legacy Mission/ClosedLoop CLI，不运行 AO Worker、Codex live、Mission 或 E2E。
+下一步独立处理 `cli.py` retirement；其余配置/高风险边界、重复模块清理与 clean
+delivery/installer/first-run 继续分批推进。
 
 ## 十二、停止条件
 
