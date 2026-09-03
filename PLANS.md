@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R4 产品化边界收敛
-- 当前任务：Project selector — 从 AO 官方 registry 选择新 Mission Project
-- 当前状态：Panel Project API、selector、启动前 ID/path 重验与历史 Mission 兼容已实现；Panel 定向 25 项、完整离线 390 项、语法、diff 与文档检查均通过
-- 下一步：提交并创建本任务 PR；本 UI/边界任务不运行真实 AO Worker/E2E
+- 当前阶段：R2 duplicate / legacy convergence
+- 当前任务：R2-1 Batch 1 — remove legacy `llm_env`
+- 当前状态：R2 Reference Graph Audit 已完成；Batch 1 仅删除 production-unreachable 的 `llm_env.py`，将 Auditor/Verifier 不设置 `ANTHROPIC_MODEL` 的当前 invariant 迁入各自 Provider 测试；两组定向测试各 8 项、完整离线 388 项与 compileall 均通过
+- 下一步：本 Batch 1 审计合并后，根据 Reference Graph Audit 结果决定下一小批 legacy cleanup；不在本任务处理其它 legacy 模块
 
 ## 一、更新规则
 
@@ -480,8 +480,23 @@ R1-1 已迁移 Planner 并恢复 dry-run，R1-2 已迁移 Auditor/Verifier，R1-
 
 R2-0 已修复真实 E2E preflight 暴露的 AO executable/runfile blocker，并在本
 workspace API PR 中以 AO 官方 loopback endpoint 取代 Worker workspace 内部目录
-推导。重复实现清理不再作为 E2E 后的第一任务；待 Competition behavior
-convergence 完成后再开始 R2-1。删除前仍必须有测试和入口证据。
+推导。Competition behavior 主路径和 Project selector 完成后，当前工作已切回
+duplicate / legacy convergence。删除前仍必须有测试和入口证据。
+
+#### R2-1 Reference Graph Audit 与 Batch 1
+
+Reference Graph Audit 已完成并确认 `llm_env.py` 从 `run_mission.py`、
+`panel/server.py` 与 Controller production roots 不可达；生产 Planner、Auditor、
+Verifier 只复用 `codex_cli.run_codex_json()`，不需要 Claude CLI、GLM gateway、
+`ANTHROPIC_MODEL` 或 `CLAUDE_CODE_GIT_BASH_PATH`。
+
+Batch 1 只删除 `src/loopcore/llm_env.py` 及其 legacy contract 测试，不复制
+`run_claude`、`_kill_process_tree`、`ensure_llm_env` 或 `find_git_bash` 到
+`codex_cli.py`。Auditor/Verifier 不设置 `ANTHROPIC_MODEL` 的 current invariant 已分别
+迁入对应 Provider 测试；Planner 的同类测试沿用既有覆盖。Auditor 与 Verifier 定向
+测试各 `8 passed`，完整离线基线为 `388 passed in 80.23s`，`compileall` 退出码为 0。
+本任务不运行 AO、Codex live probe、Mission 或 E2E，也不处理其它 legacy 模块。
+下一步根据本次审计结果决定下一小批 cleanup，不进行成组批量删除。
 
 ### R3
 
