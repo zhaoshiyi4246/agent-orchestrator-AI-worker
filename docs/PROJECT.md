@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；R2 duplicate / legacy convergence 已恢复，Reference Graph Audit 已完成，Batch 1 已删除 `llm_env.py`，Batch 2A/2B 已退休三套 legacy CLI；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
+- 状态：R1 与 R2-0 主链已完成；R2 duplicate / legacy convergence 已恢复，Reference Graph Audit 已完成，Batch 1 已删除 `llm_env.py`，Batch 2A/2B 已退休三套 legacy CLI，protocol retirement 已删除旧 AO Chat wire contract；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -78,8 +78,8 @@ run_mission.py main()
 `mission_cli.py` 与 `closed_loop_cli.py` 已在 R2 Batch 2A 退休，`cli.py` 已在
 Batch 2B 退休。v0.2 不再维护独立 supervision/watch CLI。AO events 由正式
 MissionController/ClosedLoop 路径读取并写入 StateStore，再由 StoreBusProjector、
-UI、Markdown 与 JSONL 提供派生视图。`protocol.py` 与旧 AO Client/Observer/Gate
-继续按后续独立小批次审计。
+UI、Markdown 与 JSONL 提供派生视图。R2 protocol retirement 已删除 legacy v2
+`protocol.py`；旧 AO Client/Observer/Gate 继续按后续独立小批次审计。
 
 R2-0 后，Panel 与 `run_mission.py` CLI 继续复用同一个 `build_runtime()`，并共享同一份 AO
 运行时解析结果。AO Desktop 是外部依赖：CL-AO 不携带、不安装也不自动启动
@@ -116,7 +116,8 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   和 `CodexCliVerifierProvider`；三者复用 `codex_cli.run_codex_json()`，以
   stdin、`--ephemeral`、`--sandbox read-only`、各自现有输出 schema 和
   `--output-last-message` 调用 Codex CLI，默认模型均为可配置的
-  `gpt-5.6-sol`。R2 Reference Graph Audit 已证明 `llm_env.py` 从 production
+  `gpt-5.6-sol`。三者通过 Python objects/schema 与 Controller 交互，不通过 AO
+  Chat 交换旧 camelCase DTO。R2 Reference Graph Audit 已证明 `llm_env.py` 从 production
   roots 不可达，Batch 1 已将其删除。当前 LLM role boundary 只有
   `codex_cli.run_codex_json()` 与三个 Codex Provider，不要求 Claude CLI、
   `ANTHROPIC_MODEL`、GLM gateway 或 `CLAUDE_CODE_GIT_BASH_PATH`。旧 Provider
@@ -303,14 +304,15 @@ panel /api/directive
 | `ao_adapter.py` / `ao_client.py` | 使用 `ao_adapter.py`；`ao_client.py` 未进入主路径 | `ao_client.py` 只被旧 `observer.py` 导入 | 保留 Adapter；证明兼容需求后隔离或删除旧 Client/Observer 组合 |
 | `event_observer.py` / `observer.py` | 使用 `event_observer.Observer` | `event_observer.py` 也被当前测试使用；`observer.py` 无运行入口引用 | 保留前者；后者与 CL-AO 来源一起审计 |
 | `mission_gate.py` / `integration_gate.py` | 使用 `mission_gate.IntegrationGate` | `mission_gate.py` 被当前 Controller 和测试使用；`integration_gate.py` 无运行入口引用 | 保留前者；后者与 CL-AO 来源一起审计 |
-| `mission_contracts.py` / `protocol.py` | 使用 `mission_contracts.py` | contracts 被当前模块和测试广泛使用；`protocol.py` 无运行入口引用 | 保留 contracts；确认无兼容消费者后隔离旧协议 |
+| `mission_contracts.py` | 当前唯一 Mission/Task/Audit/Planner/Verifier contract | 当前模块、测试和对应 JSON schemas 广泛使用；legacy `protocol.py` 已退休 | 保留当前 contracts；不恢复旧 camelCase AO Chat DTO |
 | 已退休 legacy CLI / `run_mission.py` | 面板和当前 CLI 只走 `run_mission.py` | `mission_cli.py`、`closed_loop_cli.py` 与 `cli.py` 已分别在 Batch 2A/2B 退休 | `run_mission.py` 是唯一 CLI runner；v0.2 不再维护独立 supervision/watch CLI |
 
 `closed-loop-v2` 没有从 `clao-src` 或 `ao-supervision-sidecar` 做跨目录 import。
-文件哈希表明，v2 的 `observer.py`、`integration_gate.py`、`protocol.py` 与
-CL-AO 对应文件相同；v2 的 Mission、Store、Verifier、worktree 和多项 CLI
-则由 sidecar 来源继续演化。两套来源目录目前只作为同时交付的历史参考，
-R0 不据此删除或移动任何文件。
+文件哈希表明，v2 的 `observer.py`、`integration_gate.py` 与 CL-AO 对应文件相同；
+legacy v2 `protocol.py` copy 已退休，`clao-src` 自己的历史副本及 callers 仍保留在
+历史来源目录。v2 的 Mission、Store、Verifier、worktree 和多项 CLI 则由 sidecar
+来源继续演化。两套来源目录目前只作为同时交付的历史参考，R0 不据此删除或移动
+任何文件。
 
 ### 5. R2-0 AO 外部运行时边界
 
@@ -458,7 +460,7 @@ Key 作为默认接入方式。
 CL-AO 唯一运行状态源，保存：
 
 - Mission、Task、状态迁移；
-- Audit、PlannerDecision、VerifierResult、GateRun；
+- AuditResult、PlannerAction、VerifierResult、GateRun；
 - 预算、恢复索引和幂等记录；
 - UI 所需稳定查询数据。
 
@@ -492,7 +494,7 @@ AO Snapshot 仍是 Agent/turn/activity/worktree 的外部事实源。恢复时�
 只读语义审计者，负责：
 
 - 根据任务目标、验收条件、约束和证据判断问题；
-- 向 Planner 提交 AuditReport；
+- 产生并提交 AuditResult，由 Planner/Controller 消费；
 - 请求必要的确定性证据。
 
 不直接向 Worker 下发自动执行指令，不修改代码，不管理 Session。
@@ -613,8 +615,9 @@ UI → 绕过 MissionController 改状态
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
 - R2：R2-0 已修复 AO 主运行路径可移植性；Reference Graph Audit 已完成，
   duplicate / legacy convergence 已恢复；Batch 1 删除 `llm_env.py`，Batch 2A 退休
-  `mission_cli.py` 与 `closed_loop_cli.py`，Batch 2B 退休 `cli.py`；其它重复模块、
-  旧入口和参考代码继续按审计证据拆成独立小批次；
+  `mission_cli.py` 与 `closed_loop_cli.py`，Batch 2B 退休 `cli.py`，protocol
+  retirement 删除旧 AO Chat wire contract；其它重复模块、旧入口和参考代码继续按
+  审计证据拆成独立小批次；
 - R3：Competition behavior convergence 已启动；Verifier final-only、gate-first、
   event freshness 与默认 Worker 1/按需最多 2 已完成，标准 smoke
   `MISSION-E2E-SMOKE-20260902-204459` 已通过；自动 master/main merge 与 origin
@@ -626,8 +629,9 @@ UI → 绕过 MissionController 改状态
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。当前工作已切回 R2 duplicate / legacy convergence；
 Reference Graph Audit 已完成，Batch 1 删除 production-unreachable 的 `llm_env.py`，
-Batch 2A/2B 已退休三个无 production caller 的 legacy CLI。下一步独立审计
-`protocol.py` contract retirement；其余 R2 小批次与剩余 R4 边界、clean
+Batch 2A/2B 已退休三个无 production caller 的 legacy CLI，protocol retirement
+已删除旧 AO Chat wire contract。下一步进入 AO Client / old Observer island audit；
+其余 R2 小批次与剩余 R4 边界、clean
 delivery/installer/first-run 仍分别推进，不改变异常 Auditor/Planner、retry、
 alert/L0 或 Mission final 验证语义。
 
