@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R2 duplicate / legacy convergence
-- 当前任务：R2-1 Gate Integrity Migration + Legacy Integration Gate Retirement
-- 当前状态：Gate retirement audit PASS；已将唯一必要 safety property——Gate repository integrity——迁入当前 `mission_gate.py`，并删除无 current caller 的 legacy v2 `integration_gate.py`；定向 61 项与完整离线 404 项均通过，compileall、diff-check 与 current production/tests legacy reference scan 均通过
-- 下一步：R2 closure audit
+- 当前阶段：R5 clean delivery / first-run
+- 当前任务：R5-1 Clean Release Boundary Audit
+- 当前状态：R2 已完成；duplicate / legacy convergence 已关闭。当前 v2 已收敛为单一 AO/Observer/Gate/Contract/CLI authority。K3 RESOLVED。K4 source boundary resolved，package boundary deferred to R5。
+- 下一步：R5-1 Clean Release Boundary Audit
 
 ## 一、更新规则
 
@@ -30,10 +30,10 @@
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
-| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；Batch 1/2A/2B、protocol 与 AOClient/old Observer island 已收敛） |
+| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 已完成 |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
-| R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
+| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（clean release boundary） |
 
 ## 三、R0 验收条件
 
@@ -444,8 +444,8 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 |---|---|---|---|
 | K1 | 旧架构文档与代码主路径不一致 | R1 | 已解决：当前 README、交付说明、架构文档、PROJECT 和前端均与真实主路径一致 |
 | K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
-| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 已收敛当前 v2：三套 legacy CLI、旧 AO Chat protocol、AOClient/old Observer island 与旧 `integration_gate.py` 均已退休；当前只保留正式边界 |
-| K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
+| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | RESOLVED：三套 legacy CLI、旧 AO Chat protocol、AOClient/old Observer island 与旧 `integration_gate.py` 均已退休；当前 v2 只保留正式边界 |
+| K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2/R5 | SOURCE_BOUNDARY_RESOLVED：主路径无跨目录 import，历史来源目录仅作参考；PACKAGE_BOUNDARY_DEFERRED_TO_R5：最终 competition release artifact 的内容边界由 R5 审计决定 |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已解决：新 Mission 默认 1；值为 1 时确定性单 lane 且不调用 decomposition Planner；显式选择 2 时 Planner 可返回 1 或 2 |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
 | K7 | issue fingerprint 包含 source | R3 | 已确认：`issue_fingerprint()` 返回值显式包含 `source` |
@@ -458,7 +458,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径与 Panel Project 选择已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导，Panel 只读 AO 官方 registry 并重验 ID/path；`CLAO_AO_DATA_DIR` 已无当前生产消费者。仍未解决：clean clone bootstrap/安装脚本与 AO 首次配置 UX；Project 注册仍由 AO 负责；旧 `AO_DATA_DIR` 兼容模块待 R2 审计，不得宣称为通用安装包 |
+| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径与 Panel Project 选择已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导，Panel 只读 AO 官方 registry 并重验 ID/path；legacy `AO_DATA_DIR` parallel runtime 已在 R2 收敛，当前 runtime 只使用正式 portable AO boundary。仍未解决：clean clone bootstrap/安装脚本与 AO 首次配置 UX；Project 注册仍由 AO 负责；不得宣称为通用安装包 |
 
 ## 十一、阶段边界
 
@@ -561,6 +561,13 @@ probe、`IntegrationGateResult`/`GateStepResult` DTO 与字符串 evidence 协�
 `git diff --check` 与 current production/tests legacy reference scan 均通过。下一步为
 R2 closure audit。
 
+R2 Closure Audit 已 PASS：current production authority 已收敛为单一
+AO/Observer/Gate/Contract/CLI 边界，已退休 legacy source 的 current production/test
+引用均为 0。K3 为 `RESOLVED`；K4 为 `SOURCE_BOUNDARY_RESOLVED`，其最终交付包
+处置为 `PACKAGE_BOUNDARY_DEFERRED_TO_R5`。R2 duplicate / legacy convergence 至此
+关闭，后续不再为 dead helper 或 mixed production module 内的少量未使用 symbol
+开启 R2 cleanup。
+
 ### R3
 
 完整 E2E 后优先做 Competition behavior convergence：
@@ -601,16 +608,12 @@ R2 closure audit。
 - 通用项目与 Demo 模式；
 - 最终比赛彩排和干净源码包。
 
-R1-1、R1-2、R1-3、R1-4 与 R2-0 主体已完成；Verifier final-only、gate-first、
-event freshness、默认单 Worker、自动 SCM 副作用移除与 R4 Project selector 均已
-完成；核心 single-worker 标准 smoke 已通过。当前 R2 Batch 2A 仅退休两个损坏的
-legacy Mission/ClosedLoop CLI，Batch 2B 继续退休 legacy supervision CLI；两批均不
-运行 AO Worker、Codex live、Mission 或 E2E。Protocol retirement 继续删除无 caller
-的旧 AO Chat wire contract，AOClient / old Observer island retirement 删除无 caller
-的旧 Client/Observer 组合；Gate integrity migration 迁移唯一必要 safety property 并
-退休无 caller 的旧 Integration Gate。下一步进入 R2 closure audit；其余配置/高风险
-边界、重复模块清理与 clean delivery/
-installer/first-run 继续分批推进。
+R1、R2 主链以及 Verifier final-only、gate-first、event freshness、默认单 Worker、
+自动 SCM 副作用移除与 R4 Project selector 均已完成；核心 single-worker 标准 smoke
+已通过。R2 Closure Audit 已 PASS，duplicate / legacy convergence 已关闭，当前 v2
+production authority 单一。历史来源继续保留在 Git repo，但不应进入最终 competition
+release artifact；具体 clean artifact、bootstrap 与 clean-machine first-run 边界从
+R5-1 Clean Release Boundary Audit 开始确定。
 
 ## 十二、停止条件
 

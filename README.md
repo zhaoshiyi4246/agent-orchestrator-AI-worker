@@ -122,8 +122,8 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 - 正常 Mission 启动和恢复找不到 AO executable 时会立即报错；只读查看已有
   Mission 存档不要求 AO executable，也不会连接 AO、调用 Codex 或创建 Worker。
 - `CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；旧自动 master 写回 helper
-  已删除，不会迁移到当前 integration 路径。遗留 `AO_DATA_DIR` 兼容模块仍留待
-  R2 按引用关系清理。
+  已删除，不会迁移到当前 integration 路径。legacy `AO_DATA_DIR` parallel runtime
+  已在 R2 收敛，当前 runtime 只使用正式 portable AO boundary。
 
 这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。Panel 已能选择
 AO 中的已注册 Project，但不会创建、注册或修改 Project；Project 注册仍由 AO
@@ -139,8 +139,9 @@ AO 中的已注册 Project，但不会创建、注册或修改 Project；Project
 4. Competition runtime 的自动 master/main merge 与 origin push 已移除；
 5. R4 Project selector 已接入 AO 官方 registry，并移除 Panel 的
    `closed-loop-demo` 隐式 fallback；
-6. 再生成主路径引用图并清理重复模块和旧入口；
-7. 最后完成 clean delivery、installer/bootstrap 与 first-run 收尾。
+6. R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 单一；
+7. R5 从 Clean Release Boundary Audit 开始，再处理 clean delivery、
+   installer/bootstrap 与 first-run。
 
 fingerprint 去 source 和 thread revision 继续作为低优先级治理项，不阻塞比赛
 行为收敛。

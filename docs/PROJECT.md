@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R1 与 R2-0 主链已完成；R2 duplicate / legacy convergence 已恢复，Reference Graph Audit 已完成，Batch 1 已删除 `llm_env.py`，Batch 2A/2B 已退休三套 legacy CLI，protocol retirement 已删除旧 AO Chat wire contract，AOClient / old Observer island retirement 已删除旧 AO 读写/观察孤岛；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已接入 AO 官方 Project registry
+- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；当前进入 R5 clean delivery / first-run
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -50,8 +50,9 @@ Integration Gate
 └─ docs/PROJECT.md
 ```
 
-R0 已通过入口、import、调用关系和测试复核上述定位。R2 完成具体引用关系证明前，
-不删除任何历史来源目录。
+R2 Closure Audit 已确认当前 v2 不跨目录依赖历史来源。`clao-src` 与
+`ao-supervision-sidecar` 继续保留在 Git repo 作为 historical/reference source，
+但不应进入最终 competition release artifact；clean artifact 的精确内容边界归 R5。
 
 ## 三、当前实现：R0/R1-4 事实基线
 
@@ -268,8 +269,9 @@ exception 则由 `ClosedLoop.step()` / `MissionController.step()` 现有连续�
 R2 Reference Graph Audit 已证明 `llm_env.py` 从 production roots 不可达，Batch 1
 已将其删除。旧 Provider 类名兼容别名、旧审批回归注释，以及
 `tasks/mission-quick-002.json` 至 `mission-quick-014.json` 中的旧 harness 字符串
-仍属于兼容或历史运行证据，不进入当前默认生产组装路径；后续 R2 小批次继续按
-引用证据决定保留、隔离或删除，不机械改名或改写 R1 历史证据。
+仍属于兼容或历史运行证据，不进入当前默认生产组装路径。R2 已关闭，不再为
+dead helper 或 mixed production module 内的少量未使用 symbol 开启 cleanup；
+R1/R2 历史证据保持原样。
 
 Legacy CLI Retirement Audit 进一步证明 `mission_cli.py` 与
 `closed_loop_cli.py` 均无生产或测试消费者，且其 Mission/单 Task 能力已由正式
@@ -367,8 +369,8 @@ K18 的主生产路径已经移除 AO executable、runfile 的开发机绝对路
 - clean clone bootstrap/安装脚本：归最终 clean-delivery 阶段；
 - AO 首次配置 UX：归比赛 UX 与 clean-delivery 阶段；
 - Project 选择：Panel 已通过 AO 官方 registry 完成；Project 注册仍由 AO 负责；
-- 旧 AO Client/CLI 和 `AO_DATA_DIR` 兼容模块：归 R2 引用审计；不得因为
-  `CLAO_AO_DATA_DIR` 已无消费者而顺手删除所有 legacy 模块。
+- legacy `AO_DATA_DIR` parallel runtime 已在 R2 收敛；当前 runtime 只使用正式
+  portable AO boundary。历史来源中的独立实现继续保留，最终交付包处置归 R5。
 
 ## 四、后续收敛目标架构
 
@@ -635,30 +637,26 @@ UI → 绕过 MissionController 改状态
 
 - R0：建立治理文件，确认真实入口、调用关系和测试基线（已完成）；
 - R1：Codex Provider、Worker、当前文档和前端拓扑事实统一（已完成）；
-- R2：R2-0 已修复 AO 主运行路径可移植性；Reference Graph Audit 已完成，
-  duplicate / legacy convergence 已恢复；Batch 1 删除 `llm_env.py`，Batch 2A 退休
-  `mission_cli.py` 与 `closed_loop_cli.py`，Batch 2B 退休 `cli.py`，protocol
-  retirement 删除旧 AO Chat wire contract，AOClient / old Observer island
-  retirement 删除无 caller 的旧 Client/Observer 组合；其它重复模块、旧入口和参考
-  代码继续按审计证据拆成独立小批次；
+- R2：已完成。R2-0 修复 AO 主运行路径可移植性；后续 retirement batches 删除无
+  caller 的 legacy LLM helper、三套 CLI、AO Chat protocol、AOClient/old Observer
+  island 与旧 Integration Gate。Closure Audit PASS，K3 `RESOLVED`，K4
+  `SOURCE_BOUNDARY_RESOLVED` / `PACKAGE_BOUNDARY_DEFERRED_TO_R5`；
 - R3：Competition behavior convergence 已启动；Verifier final-only、gate-first、
   event freshness 与默认 Worker 1/按需最多 2 已完成，标准 smoke
   `MISSION-E2E-SMOKE-20260902-204459` 已通过；自动 master/main merge 与 origin
   push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
 - R4：Project selector 已完成；其余继续收敛配置和高风险功能；
-- R5：CI、全新安装、真实 Demo 与干净交付。
+- R5：进行中，从 Clean Release Boundary Audit 开始处理 CI、全新安装、真实 Demo
+  与干净交付。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
-R4 Project selector 已完成。当前工作已切回 R2 duplicate / legacy convergence；
-Reference Graph Audit 已完成，Batch 1 删除 production-unreachable 的 `llm_env.py`，
-Batch 2A/2B 已退休三个无 production caller 的 legacy CLI，protocol retirement
-已删除旧 AO Chat wire contract，AOClient / old Observer island retirement 已删除
-旧 Client/Observer 组合；Gate integrity migration 已补齐当前 Gate 的 repository
-integrity 缺口并退休旧 `integration_gate.py`。下一步进入 R2 closure audit；其余 R2
-小批次与剩余 R4 边界、clean
-delivery/installer/first-run 仍分别推进，不改变异常 Auditor/Planner、retry、
-alert/L0 或 Mission final 验证语义。
+R4 Project selector 已完成。R2 Closure Audit 已 PASS，duplicate / legacy
+convergence 已关闭；当前 v2 production authority 单一，已退休 legacy source 的
+current production/test refs 均为 0。历史来源继续保留在 Git repo，但不应进入最终
+competition release artifact。下一步为 R5-1 Clean Release Boundary Audit；clean
+artifact、dependency bootstrap、preflight 与 clean-machine first-run 均由 R5 后续
+任务决定，不改变现有 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 
 ## 十、明确非目标
 
