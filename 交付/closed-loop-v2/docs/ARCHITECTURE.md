@@ -33,9 +33,11 @@ Panel / run_mission.py
 ```
 
 Planner 是唯一自动规划角色。Auditor 只提交语义审计结果，不直接控制 Worker；
-Verifier 只提交最终或高风险复核结果。正常路径默认只有一个 Worker；只有用户显式选择
-且任务确实可独立并行时，Planner 才能安排最多两个 Worker。普通 Task 在确定性证据
-充分时先运行 Task Gate；正常 Mission 只在 Final Gate 后调用一次 Mission Verifier。
+Verifier 在新 Mission 的正常路径中只在 Final Gate 后提交 Mission 终局复核结果，
+不直接控制 Worker。正常路径默认只有一个 Worker；只有用户显式选择且任务确实可独立
+并行时，Planner 才能安排最多两个 Worker。普通 Task 在确定性证据充分时先运行 Task
+Gate；Task Gate PASS 后不调用 Task Verifier。正常 Mission 只在 Final Gate 后调用
+一次 Mission Verifier。
 
 Observer 和 Integration Gate 都是确定性程序，不调用模型。Gate 在显式 worktree 中
 运行固定命令，并检查前后 HEAD、index、tracked/untracked 内容的 repository
