@@ -425,7 +425,7 @@ class ClosedLoop:
     def _maybe_auto_approve(self) -> bool:
         """Resolve pending approvals for edits inside allowed_paths.
 
-        The claude-code harness asks for permission before every Edit/Write;
+        An AO Codex Worker may request approval before Edit/Write operations;
         in an unattended mission nobody answers and the worker stalls with a
         turn in flight (real-run evidence: 30 min stall -> budget HUMAN).
         Policy (user-approved): file edits whose target resolves inside the
