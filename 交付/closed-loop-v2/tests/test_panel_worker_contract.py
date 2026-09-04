@@ -17,7 +17,7 @@ from panel import server as panel_server
 SERVER = Path(__file__).resolve().parents[1] / "panel" / "server.py"
 INDEX = SERVER.with_name("index.html")
 PRODUCT_ROOT = SERVER.parents[1]
-PROJECT_DOC = PRODUCT_ROOT.parents[1] / "docs" / "PROJECT.md"
+PRODUCT_ARCHITECTURE = PRODUCT_ROOT / "docs" / "ARCHITECTURE.md"
 
 
 def _start_panel_mission(monkeypatch, tmp_path, max_subtasks=...):
@@ -158,15 +158,20 @@ def test_panel_and_cli_share_build_runtime():
 
 def test_retired_legacy_cli_entrypoints_stay_out_of_product_roots():
     loopcore = PRODUCT_ROOT / "src" / "loopcore"
-    project_text = PROJECT_DOC.read_text(encoding="utf-8")
+    architecture = PRODUCT_ARCHITECTURE.read_text(encoding="utf-8")
 
     assert not (loopcore / "cli.py").exists()
     assert not (loopcore / "mission_cli.py").exists()
     assert not (loopcore / "closed_loop_cli.py").exists()
     assert (PRODUCT_ROOT / "run_mission.py").is_file()
+    assert (PRODUCT_ROOT / "启动CLAO.bat").is_file()
+    assert not (PRODUCT_ROOT / "启动面板.bat").exists()
     assert SERVER.is_file()
-    assert "正式运行入口只有 Panel 与 `run_mission.py`" in project_text
-    assert "仍可作为旧的监督、单任务和 Mission 兼容入口运行" not in project_text
+    assert "正式运行入口只有" in architecture
+    assert "Panel" in architecture
+    assert "`run_mission.py`" in architecture
+    for retired_cli in ("loopcore.cli", "mission_cli.py", "closed_loop_cli.py"):
+        assert retired_cli not in architecture
 
 
 def test_panel_omitted_max_subtasks_defaults_to_one(monkeypatch, tmp_path):

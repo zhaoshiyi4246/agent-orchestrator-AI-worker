@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder 与 R5-4 clean release rehearsal 已完成；PR #27 正在收敛 AO 0.12.9 Project preflight 与 spawn diagnostics，完成后先进入 CLAO Product Layout，再重新运行 R5-5 final live rehearsal
+- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder、R5-4 clean release rehearsal 与 PR #27 AO 0.12.9 workspace preflight/spawn diagnostics 已完成；当前实施 R5-4.5 CLAO Product Layout，下一步重新运行 R5-5 final live rehearsal
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -52,7 +52,9 @@ Integration Gate
 
 R2 Closure Audit 已确认当前 v2 不跨目录依赖历史来源。`clao-src` 与
 `ao-supervision-sidecar` 继续保留在 Git repo 作为 historical/reference source，
-但不应进入最终 competition release artifact；clean artifact 的精确内容边界归 R5。
+但不进入最终 competition release artifact。开发仓库继续保留 `交付/`、治理文档和
+历史来源；release builder 依据 `交付/release-manifest.txt` 将当前产品映射为 ZIP 中
+唯一顶层目录 `clao/`，不把开发审计文档或历史目录带入产品。
 
 ## 三、当前实现：R0/R1-4 事实基线
 
@@ -61,7 +63,7 @@ R2 Closure Audit 已确认当前 v2 不跨目录依赖历史来源。`clao-src` 
 当前对外主运行入口只有两条，最终复用同一组装路径：
 
 ```text
-启动面板.bat
+启动CLAO.bat
   → panel/server.py
   → PanelState.start_mission()
   → run_mission.setup_environment() / load_config() / build_runtime()
@@ -656,9 +658,10 @@ UI → 绕过 MissionController 改状态
   push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
 - R4：Project selector 已完成；其余继续收敛配置和高风险功能；
-- R5：进行中；boundary audit、Python bootstrap、shared preflight、allowlist builder
-  与 clean release rehearsal 已完成；PR #27 正在修正 AO 0.12.9 workspace preflight
-  与 spawn diagnostics，完成后先进入 CLAO Product Layout，再重新执行 final live。
+- R5：进行中；boundary audit、Python bootstrap、shared preflight、clean release
+  rehearsal 与 PR #27 AO 0.12.9 workspace preflight/spawn diagnostics 已完成；当前
+  R5-4.5 以 source-to-destination manifest 生成顶层 `clao/` 产品布局，下一步重新执行
+  final R5-5 live rehearsal。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。R2 Closure Audit 已 PASS，duplicate / legacy
@@ -672,8 +675,9 @@ ZIP，并只使用第二个全新目录中的 ZIP 解压内容完成两次 boots
 测试、compileall、deterministic dry-run、Panel offline import、独立 SHA256SUMS、
 Markdown link 与 hygiene 验证；没有调用真实 AO/Codex。初次 R5-5 已暴露 AO Git
 Project workspace readiness blocker；remote-backed 本地 bare origin 的 raw spawn
-随后已 PASS，但完整 CLI Mission 与 GUI 彩排仍未执行。下一步先完成 PR #27 与
-CLAO Product Layout，再重新运行 R5-5；本轮不改变现有
+随后已 PASS，但完整 CLI Mission 与 GUI 彩排仍未执行。PR #27 已完成 remote-backed
+Project preflight 与脱敏 spawn diagnostics；当前 R5-4.5 保留开发仓库 source layout，
+通过 release mapping 构建顶层 `clao/` 产品。下一步重新运行 R5-5；本轮不改变现有
 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 
 ## 十、明确非目标

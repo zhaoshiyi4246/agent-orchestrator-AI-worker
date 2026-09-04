@@ -44,7 +44,7 @@ R2/R3/R4 的后续目标会明确标注，不提前写成当前能力。
 当前对外入口有两条，并复用同一个 `build_runtime()` 组装路径：
 
 ```text
-启动面板.bat → panel/server.py → PanelState.start_mission()
+启动CLAO.bat → panel/server.py → PanelState.start_mission()
   → run_mission.build_runtime() → MissionController.step()
 
 run_mission.py main()

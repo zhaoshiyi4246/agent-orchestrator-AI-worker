@@ -1,5 +1,5 @@
 @echo off
-rem 闭环智能体控制台 — 双击启动，自动准备 Python 环境并打开浏览器
+rem CLAO — 双击启动，自动准备 Python 环境并打开浏览器
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" goto bootstrap

@@ -10,7 +10,7 @@
 ## 首次安装
 
 当前 v2 面向 Windows 与 CPython 3.12.x。进入 `closed-loop-v2/` 后双击
-`启动面板.bat`，会在缺少本地 Python 环境时自动执行 `bootstrap.ps1`；也可手动运行：
+`启动CLAO.bat`，会在缺少本地 Python 环境时自动执行 `bootstrap.ps1`；也可手动运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
@@ -114,7 +114,7 @@ closed-loop-v2/               当前主产品候选
   tasks/mission-quick.json    当前 Codex dry-run 示例
   tasks/e2e-smoke.json        固定标准 E2E 输入（不自动执行）
   run_mission.py              CLI 与运行时组装入口
-  启动面板.bat                 面板启动入口
+  启动CLAO.bat                 CLAO 面板启动入口
   tests/                      v0.2 自动化测试
 
 clao-src/                     历史来源与参考实现
