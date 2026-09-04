@@ -8,6 +8,19 @@ Project、Session、Conversation、Agent Runtime、worktree 和 PR/SCM 能力；
 当前权威架构见 [`docs/PROJECT.md`](docs/PROJECT.md)。`交付/closed-loop-v2/`
 是当前 v0.2 主产品候选路径。
 
+## 首次安装
+
+Windows 用户需预先安装 CPython 3.12.x。进入 `交付/closed-loop-v2/` 后可直接
+双击 `启动面板.bat`；启动器会在需要时运行 `bootstrap.ps1`，创建本地 `.venv`
+并安装精确固定的 Python 依赖。也可以手动执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+bootstrap 不安装 Python、Git、AO Desktop/CLI 或 Codex CLI。Git、AO，以及已通过
+ChatGPT 登录的 Codex CLI 在实际运行 Mission 时仍是外部 prerequisite。
+
 ## 当前真实架构
 
 ```text
@@ -127,8 +140,9 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 
 这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。Panel 已能选择
 AO 中的已注册 Project，但不会创建、注册或修改 Project；Project 注册仍由 AO
-负责。clean clone 的首次 bootstrap/安装脚本与 AO 首次配置体验尚未完成；当前
-仓库不能宣称为通用安装包或“解压即用”产品。
+负责。clean-machine Python bootstrap 已提供；AO/Codex/Git Mission preflight、
+AO 首次配置体验与最终 release builder 仍未完成，因此当前仓库仍不能宣称为通用
+安装包或“解压即用”产品。
 
 ## 后续顺序
 

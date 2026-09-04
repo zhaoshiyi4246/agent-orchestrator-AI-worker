@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R5 clean delivery / first-run
-- 当前任务：R5-1 Clean Release Boundary Audit
-- 当前状态：R2 已完成；duplicate / legacy convergence 已关闭。当前 v2 已收敛为单一 AO/Observer/Gate/Contract/CLI authority。K3 RESOLVED。K4 source boundary resolved，package boundary deferred to R5。
-- 下一步：R5-1 Clean Release Boundary Audit
+- 当前任务：R5-2 Dependency / Bootstrap
+- 当前状态：R5-1 Clean Release Boundary Audit 已 PASS；release 主策略为 `ALLOWLIST_RELEASE`。当前实现 clean-machine Python dependency/bootstrap 边界。
+- 下一步：R5-3 Preflight + Clean Artifact Builder
 
 ## 一、更新规则
 
@@ -33,7 +33,7 @@
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 已完成 |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
-| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（clean release boundary） |
+| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（dependency/bootstrap） |
 
 ## 三、R0 验收条件
 
@@ -458,7 +458,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径与 Panel Project 选择已解决：AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导，Panel 只读 AO 官方 registry 并重验 ID/path；legacy `AO_DATA_DIR` parallel runtime 已在 R2 收敛，当前 runtime 只使用正式 portable AO boundary。仍未解决：clean clone bootstrap/安装脚本与 AO 首次配置 UX；Project 注册仍由 AO 负责；不得宣称为通用安装包 |
+| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径、Panel Project 选择与 R5-2 clean-machine Python bootstrap 已解决；AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导，legacy `AO_DATA_DIR` parallel runtime 已收敛。仍未解决：AO/Codex/Git Mission preflight、clean artifact builder 与 AO 首次配置 UX；Project 注册仍由 AO 负责；不得宣称为通用安装包 |
 
 ## 十一、阶段边界
 
@@ -612,8 +612,15 @@ R1、R2 主链以及 Verifier final-only、gate-first、event freshness、默认
 自动 SCM 副作用移除与 R4 Project selector 均已完成；核心 single-worker 标准 smoke
 已通过。R2 Closure Audit 已 PASS，duplicate / legacy convergence 已关闭，当前 v2
 production authority 单一。历史来源继续保留在 Git repo，但不应进入最终 competition
-release artifact；具体 clean artifact、bootstrap 与 clean-machine first-run 边界从
-R5-1 Clean Release Boundary Audit 开始确定。
+release artifact；R5-1 Clean Release Boundary Audit 已确定 clean artifact、bootstrap
+与 clean-machine first-run 边界。
+
+R5-1 Clean Release Boundary Audit 已 PASS，并确定最终打包主策略为
+`ALLOWLIST_RELEASE`。R5-2 只实现 CPython 3.12、本地 `.venv`、精确 Python
+dependencies 与 Panel first-run launcher；AO/Codex/Git Mission preflight 和 clean
+artifact builder 留给 R5-3。release samples 当前仍引用 `closed-loop-demo`，而最终
+artifact 不包含该 demo；R5-3 必须把 sample 调整为 release-safe，不能发布默认必然
+失败的 `project_id`。
 
 ## 十二、停止条件
 

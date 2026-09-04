@@ -7,6 +7,19 @@
 当前权威架构是仓库根目录的 `docs/PROJECT.md`；本目录的
 `ARCHITECTURE-v0.2.md` 与其保持一致。
 
+## 首次安装
+
+当前 v2 面向 Windows 与 CPython 3.12.x。进入 `closed-loop-v2/` 后双击
+`启动面板.bat`，会在缺少本地 Python 环境时自动执行 `bootstrap.ps1`；也可手动运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+bootstrap 只创建 `.venv` 并安装固定版本的 Python dependencies，不安装 Python、
+Git、AO Desktop/CLI 或 Codex CLI。后三者及 Codex ChatGPT 登录在运行 Mission 时
+仍是外部 prerequisite。
+
 ## 当前产品边界
 
 AO 负责 Project、Session、Conversation、Agent Runtime、worktree 和 PR/SCM。
@@ -124,10 +137,10 @@ R2-0 已从当前生产主路径移除开发者绝对 AO 路径。AO Desktop 是
   Project，后端在创建 runtime/Worker 前重新查询并验证 ID 与本地目录 path；不读取
   `ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录，也不伪造 demo Project。
 
-上述结论只表示“运行时路径可移植”，不表示“任意用户零配置安装”。clean clone
-bootstrap/安装脚本和 AO 首次配置 UX 仍未完成；Panel 已能选择 AO 中的已注册
-Project，但 Project 创建、注册和修改仍由 AO 负责。当前交付不能宣称为通用安装包
-或解压即用产品。
+上述结论只表示“运行时路径可移植”，不表示“任意用户零配置安装”。clean-machine
+Python bootstrap 已提供；AO/Codex/Git Mission preflight、AO 首次配置 UX 与 clean
+artifact builder 仍未完成。Panel 已能选择 AO 中的已注册 Project，但 Project 创建、
+注册和修改仍由 AO 负责。当前交付不能宣称为通用安装包或解压即用产品。
 
 ## 当前实现与阶段事项
 
@@ -156,11 +169,12 @@ Project，但 Project 创建、注册和修改仍由 AO 负责。当前交付不
 - fingerprint/source 与 thread revision 继续保持低优先级。
 
 Project selector 已完成；Project 注册本身仍由 AO 负责，其他首次配置 UX 继续归
-后续任务。历史 Mission 查看/resume 保留已持久化的 `project_id`；CLI 仍通过
+后续任务。R5-2 已提供 clean-machine Python bootstrap，Mission preflight 与 clean
+artifact builder 留给后续批次。历史 Mission 查看/resume 保留已持久化的
+`project_id`；CLI 仍通过
 Mission JSON 显式提供 `project_id`。若未来需要主分支交付，用户显式 SCM 操作也应
 作为独立设计处理。legacy `AO_DATA_DIR` parallel runtime 已在 R2 收敛；当前
-runtime 只使用正式 portable AO boundary。clean artifact、dependency bootstrap、
-preflight 与 clean-machine first-run 归 R5。
+runtime 只使用正式 portable AO boundary。
 
 ## 本地验证
 
