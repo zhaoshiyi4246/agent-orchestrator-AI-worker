@@ -124,8 +124,9 @@ selector 选择真实 AO Project，无需编辑 template。不得删除旧 `runt
 - AO runtime discovery/path contract 已完成可移植化，legacy `AO_DATA_DIR` parallel
   runtime 已在 R2 收敛。R5-2 已提供 clean-machine Python bootstrap；R5-3 增加了
   shared Mission preflight，并以 `交付/release-manifest.txt` 为唯一 allowlist authority，
-  由 `交付/build-release.ps1` 从 clean HEAD 构建 repo 外 artifact。clean-release
-  rehearsal 与真实 AO/Codex 彩排仍待 R5-4/R5-5。
+  由 `交付/build-release.ps1` 从 clean HEAD 构建 repo 外 artifact。R5-4 已验证最终
+  ZIP 在全新解压目录中可以 bootstrap、运行全量 self-test、compileall、deterministic
+  dry-run 和 Panel offline import；真实 AO/Codex Mission 与 GUI 彩排仍待 R5-5。
 - Competition runtime 不提供自动 push。
 
 ## 验证
