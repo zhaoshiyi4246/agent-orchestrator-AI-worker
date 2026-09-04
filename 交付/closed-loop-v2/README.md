@@ -31,6 +31,15 @@ bootstrap 只创建本目录的 `.venv` 并安装 `requirements.txt` 中的 Pyth
 可读取该 Project、Codex CLI 已通过 ChatGPT 登录，以及四个生产模型配置非空。
 preflight 不安装外部工具、不调用模型，也不检查目标项目自己的 Gate dependencies。
 
+针对已验证的 AO Desktop 0.12.9，Git-backed AO Project 还必须具有 `origin`
+remote 和可用的 remote-backed base ref：显式 `defaultBranch=<branch>` 时，
+`refs/remotes/origin/<branch>` 必须存在；`defaultBranch=auto` 时，
+`refs/remotes/origin/HEAD` 必须指向一个可解析的 remote branch。无 `origin` 的
+local-only repository 不受当前 v0.2 支持。`origin` 可以是 GitHub/GitLab remote，
+也可以是完全本地的 bare Git repository，因此这项契约本身不要求互联网连接。
+CLAO 不会自动执行 `git fetch`、添加 remote、设置 remote HEAD 或修改 AO Project
+config；shared preflight 会在创建 runtime 前以可操作错误报告缺失项。
+
 安装后可执行自验证：
 
 ```powershell

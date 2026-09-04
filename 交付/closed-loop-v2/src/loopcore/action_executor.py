@@ -162,6 +162,14 @@ class ActionExecutor:
         try:
             proc = self._run(self._spawn_args(project_id, harness, name,
                                               prompt))
+        except subprocess.TimeoutExpired:
+            # TimeoutExpired.__str__ includes its cmd, which contains the full
+            # --prompt value. Never inspect or persist that exception text.
+            raw = "TimeoutExpired: AO spawn timed out after 120 seconds"
+            self._last_spawn_classification = "transient"
+            self._last_spawn_error = _sanitize_spawn_error(
+                raw)[:_SPAWN_SUMMARY_LIMIT]
+            return None
         except Exception as e:  # timeout / transport -> transient
             raw = "%s: %s" % (type(e).__name__, e)
             self._last_spawn_classification = (

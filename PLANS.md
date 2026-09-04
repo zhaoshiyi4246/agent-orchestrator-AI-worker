@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R5 clean delivery / first-run
-- 当前任务：R5-4 Clean Release Rehearsal
-- 当前状态：从 main clean HEAD 构建的最终 ZIP 已在全新 repo 外目录完成 extract、bootstrap、self-test、compile、deterministic dry-run 与 Panel offline import；R5-4 PASS。
-- 下一步：R5-5 Final Live Rehearsal
+- 当前任务：PR #27 AO 0.12.9 workspace preflight + spawn diagnostics
+- 当前状态：R5-4 PASS；R5-5 final live 尚未完成。PR #27 正在修复 remote-backed Project preflight 和持久化、脱敏的 spawn failure diagnostics。
+- 下一步：完成 PR #27 后进入 CLAO Product Layout，再重新运行最终 R5-5
 
 ## 一、更新规则
 
@@ -33,7 +33,7 @@
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 已完成 |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
-| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（final live rehearsal） |
+| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（AO workspace prerequisite fix；final live 未完成） |
 
 ## 三、R0 验收条件
 
@@ -639,6 +639,17 @@ extra 均为 0；3 个本地 Markdown 链接 missing 为 0。bootstrap 首次创
 offline import 均通过，dry-run/import 前后没有 runtime。原始 ZIP 哈希保持不变；
 未调用真实 AO、Codex login/model、Worker、完整 Mission 或 GUI。下一步为 R5-5
 Final Live Rehearsal。
+
+R5-5 初次启动 Worker 时在 AO 创建 Session/Codex turn 前失败，完整 root cause 为
+`DEFAULT_BRANCH_UNRESOLVED`，不是网络故障。为 Project 显式设置
+`defaultBranch=main` 但继续使用无 remote 的 local-only repository 后，AO 0.12.9
+仍以 `WORKSPACE_CREATE_FAILED` 拒绝创建 workspace，因为实际需要
+`refs/remotes/origin/main`。这否定了“显式本地分支即可支持 local-only Project”的
+假设。随后使用完全本地的 bare `origin`、可解析的 `origin/main` 与指向它的
+`origin/HEAD` 进行 raw AO spawn，Codex Worker turn 和精确回复均 PASS，全程不依赖
+GitHub。PR #27 正在将 shared preflight 收窄为这一已验证的 remote-backed contract，
+并持久化经过脱敏、有界的 spawn failure root cause；R5-5 尚未通过。完成 #27 后先
+进入 CLAO Product Layout，再重新运行最终 R5-5。
 
 ## 十二、停止条件
 
