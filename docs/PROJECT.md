@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder 与 R5-4 clean release rehearsal 已完成，下一步为 R5-5 final live rehearsal
+- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder 与 R5-4 clean release rehearsal 已完成；PR #27 正在收敛 AO 0.12.9 Project preflight 与 spawn diagnostics，完成后先进入 CLAO Product Layout，再重新运行 R5-5 final live rehearsal
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -156,6 +156,12 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   placeholder、缺失/未知 ID、空或不存在的 path，并确认该路径为具有 Git identity
   的 Git worktree。preflight 还检查 CPython 3.12、AO daemon/API、Codex ChatGPT
   登录和四个生产模型配置；不调用模型，也不检查目标项目 Gate dependencies。
+  针对已验证的 AO Desktop 0.12.9，Git-backed Project 必须有 `origin` remote：
+  显式 `defaultBranch=<branch>` 要求 `refs/remotes/origin/<branch>` 可解析；
+  `defaultBranch=auto` 要求 `refs/remotes/origin/HEAD` 指向可解析的 remote branch。
+  无 `origin` 的 local-only repository 当前不受支持；`origin` 可以是 GitHub/GitLab，
+  也可以是无需互联网的本地 bare repository。preflight 只读且 fail fast，不执行
+  `git fetch`、添加 remote、设置 remote HEAD 或修改 AO Project config。
   Panel 不再隐式回退 `closed-loop-demo`，也不自动选择、创建、注册或修改其它
   Project。Project 注册仍由 AO 负责；CLI 仍从 Mission JSON 显式读取
   `project_id`。历史 Mission 的查看和 resume 继续使用 StateStore 中已持久化的
@@ -651,7 +657,8 @@ UI → 绕过 MissionController 改状态
   fingerprint/thread revision 保持低优先级；
 - R4：Project selector 已完成；其余继续收敛配置和高风险功能；
 - R5：进行中；boundary audit、Python bootstrap、shared preflight、allowlist builder
-  与 clean release rehearsal 已完成，下一步执行 final live rehearsal。
+  与 clean release rehearsal 已完成；PR #27 正在修正 AO 0.12.9 workspace preflight
+  与 spawn diagnostics，完成后先进入 CLAO Product Layout，再重新执行 final live。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。R2 Closure Audit 已 PASS，duplicate / legacy
@@ -663,8 +670,10 @@ competition release artifact。R5-1 boundary audit 与 R5-2 bootstrap 已完成�
 两个 sample 的 Project 改为显式 placeholder。R5-4 已从 main clean HEAD 构建最终
 ZIP，并只使用第二个全新目录中的 ZIP 解压内容完成两次 bootstrap、423 项 artifact
 测试、compileall、deterministic dry-run、Panel offline import、独立 SHA256SUMS、
-Markdown link 与 hygiene 验证；没有调用真实 AO/Codex。下一步是 R5-5 Final Live
-Rehearsal；尚未完成真实 AO/Codex Mission 或 GUI 彩排，也不改变现有
+Markdown link 与 hygiene 验证；没有调用真实 AO/Codex。初次 R5-5 已暴露 AO Git
+Project workspace readiness blocker；remote-backed 本地 bare origin 的 raw spawn
+随后已 PASS，但完整 CLI Mission 与 GUI 彩排仍未执行。下一步先完成 PR #27 与
+CLAO Product Layout，再重新运行 R5-5；本轮不改变现有
 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 
 ## 十、明确非目标

@@ -205,6 +205,56 @@ def test_spawn_classifier_uses_network_text_after_300_chars(
     assert store.counter_get("spawn_attempts:" + task.task_id) == 0
 
 
+def test_spawn_timeout_never_persists_prompt_argv(tmp_path, monkeypatch):
+    ex, store = _executor(tmp_path)
+    task_dict = _task_spec()
+    task_dict["objective"] = "R5_PRIVATE_OBJECTIVE_SENTINEL"
+    task_dict["acceptance_criteria"] = [{
+        "id": "AC-PRIVATE",
+        "description": "R5_PRIVATE_ACCEPTANCE_SENTINEL",
+    }]
+    task_dict["gate_commands"] = ["R5_PRIVATE_GATE_SENTINEL"]
+    task = TaskSpec.from_dict(task_dict)
+    leaked = {}
+
+    def timeout(argv, *_args, **_kwargs):
+        error = subprocess.TimeoutExpired(cmd=["ao"] + argv, timeout=120)
+        leaked["exception_text"] = str(error)
+        raise error
+
+    monkeypatch.setattr(ex, "_run", timeout)
+
+    assert ex.spawn_initial_worker(task) is None
+    assert "R5_PRIVATE_OBJECTIVE_SENTINEL" in leaked["exception_text"]
+    assert "R5_PRIVATE_ACCEPTANCE_SENTINEL" in leaked["exception_text"]
+    assert "R5_PRIVATE_GATE_SENTINEL" in leaked["exception_text"]
+    assert store.counter_get("spawn_transient:" + task.task_id) == 1
+    assert store.counter_get("spawn_attempts:" + task.task_id) == 0
+
+    payload_json = store._conn.execute(
+        "SELECT payload_json FROM alerts").fetchone()[0]
+    payload = json.loads(payload_json)
+    assert payload["alert_type"] == "SPAWN_FAILURE"
+    assert payload["classification"] == "transient"
+    assert payload["attempt"] == 1
+    assert "timed out" in payload["summary"]
+    assert "120" in payload["summary"]
+
+    detail = ex.spawn_budget_detail(task.task_id)
+    private_values = (
+        "R5_PRIVATE_OBJECTIVE_SENTINEL",
+        "R5_PRIVATE_ACCEPTANCE_SENTINEL",
+        "R5_PRIVATE_GATE_SENTINEL",
+        "Task:",
+        "Acceptance criteria:",
+        "The gate command for this task:",
+        "--prompt",
+    )
+    for private in private_values:
+        assert private not in payload_json
+        assert private not in detail
+
+
 def test_spawn_failure_alert_is_bounded_and_sanitized(tmp_path, monkeypatch):
     ex, store = _executor(tmp_path)
     task = TaskSpec.from_dict(_task_spec())
