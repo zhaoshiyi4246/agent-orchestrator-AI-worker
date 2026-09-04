@@ -1,0 +1,23 @@
+# Repository-relative paths included in the competition release.
+# A trailing slash expands to tracked files below that prefix at HEAD.
+
+README.md
+docs/PROJECT.md
+
+交付/ARCHITECTURE-v0.2.md
+交付/README-交付说明.md
+
+交付/closed-loop-v2/README.md
+交付/closed-loop-v2/requirements.txt
+交付/closed-loop-v2/bootstrap.ps1
+交付/closed-loop-v2/启动面板.bat
+交付/closed-loop-v2/run_mission.py
+交付/closed-loop-v2/config/
+交付/closed-loop-v2/panel/
+交付/closed-loop-v2/prompts/
+交付/closed-loop-v2/schemas/
+交付/closed-loop-v2/src/loopcore/
+交付/closed-loop-v2/tests/
+
+交付/closed-loop-v2/tasks/e2e-smoke.json
+交付/closed-loop-v2/tasks/mission-quick.json

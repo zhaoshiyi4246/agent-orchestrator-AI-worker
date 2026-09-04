@@ -20,6 +20,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 
 bootstrap 不安装 Python、Git、AO Desktop/CLI 或 Codex CLI。Git、AO，以及已通过
 ChatGPT 登录的 Codex CLI 在实际运行 Mission 时仍是外部 prerequisite。
+Panel 与 CLI 的正常 Mission 启动会在创建 runtime 前执行同一只读 preflight；最终
+release 由 `交付/release-manifest.txt` 的 allowlist 定义，并通过
+`交付/build-release.ps1` 从 clean HEAD 构建，不复制本地工作目录。
 
 ## 当前真实架构
 
@@ -140,9 +143,9 @@ R2-0 已移除当前生产主路径中的开发者绝对 AO 路径。AO Desktop 
 
 这解决的是“运行时路径可移植性”，不是“任意用户零配置安装”。Panel 已能选择
 AO 中的已注册 Project，但不会创建、注册或修改 Project；Project 注册仍由 AO
-负责。clean-machine Python bootstrap 已提供；AO/Codex/Git Mission preflight、
-AO 首次配置体验与最终 release builder 仍未完成，因此当前仓库仍不能宣称为通用
-安装包或“解压即用”产品。
+负责。clean-machine Python bootstrap、AO/Codex/Git Mission preflight 与 allowlist
+release builder 已提供；clean-release rehearsal、AO 首次配置体验与真实 AO/Codex
+彩排仍未完成，因此当前仓库仍不能宣称为已完成验证的“解压即用”产品。
 
 ## 后续顺序
 
@@ -154,8 +157,8 @@ AO 首次配置体验与最终 release builder 仍未完成，因此当前仓库
 5. R4 Project selector 已接入 AO 官方 registry，并移除 Panel 的
    `closed-loop-demo` 隐式 fallback；
 6. R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 单一；
-7. R5 从 Clean Release Boundary Audit 开始，再处理 clean delivery、
-   installer/bootstrap 与 first-run。
+7. R5-1 boundary audit、R5-2 bootstrap 与 R5-3 preflight/release builder 已实施；
+   下一步为 R5-4 Clean Release Rehearsal。
 
 fingerprint 去 source 和 thread revision 继续作为低优先级治理项，不阻塞比赛
 行为收敛。

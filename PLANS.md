@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R5 clean delivery / first-run
-- 当前任务：R5-2 Dependency / Bootstrap
-- 当前状态：R5-1 Clean Release Boundary Audit 已 PASS；release 主策略为 `ALLOWLIST_RELEASE`。当前实现 clean-machine Python dependency/bootstrap 边界。
-- 下一步：R5-3 Preflight + Clean Artifact Builder
+- 当前任务：R5-3 Preflight + Clean Artifact Builder
+- 当前状态：R5-2 bootstrap 已完成；`ALLOWLIST_RELEASE` 已由唯一 manifest 与 clean-HEAD builder 实现，Panel/CLI 复用 shared Mission preflight。
+- 下一步：R5-4 Clean Release Rehearsal
 
 ## 一、更新规则
 
@@ -33,7 +33,7 @@
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 已完成 |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
-| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（dependency/bootstrap） |
+| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（preflight/release builder） |
 
 ## 三、R0 验收条件
 
@@ -617,10 +617,15 @@ release artifact；R5-1 Clean Release Boundary Audit 已确定 clean artifact、
 
 R5-1 Clean Release Boundary Audit 已 PASS，并确定最终打包主策略为
 `ALLOWLIST_RELEASE`。R5-2 只实现 CPython 3.12、本地 `.venv`、精确 Python
-dependencies 与 Panel first-run launcher；AO/Codex/Git Mission preflight 和 clean
-artifact builder 留给 R5-3。release samples 当前仍引用 `closed-loop-demo`，而最终
-artifact 不包含该 demo；R5-3 必须把 sample 调整为 release-safe，不能发布默认必然
-失败的 `project_id`。
+dependencies 与 Panel first-run launcher。R5-3 增加 Panel/CLI 共用的 Mission
+preflight，在创建 runtime/StateStore/Worker 前检查 CPython、Git worktree/identity、
+AO daemon/Project、Codex ChatGPT 登录和生产模型配置；该检查不调用模型或检查目标
+项目 Gate dependencies。`交付/release-manifest.txt` 是唯一 package allowlist，
+`交付/build-release.ps1` 从 clean HEAD tracked tree 构建 repo 外 staging/zip、校验
+文件集合、文档链接、generated/history hygiene 与高置信 secret，并生成
+`SHA256SUMS.txt`。两个 sample 已改用 `REPLACE_WITH_AO_PROJECT_ID`，不恢复 demo
+fallback。下一步为 R5-4 Clean Release Rehearsal；本批未运行 AO Worker、Codex live、
+完整 Mission 或 GUI。
 
 ## 十二、停止条件
 

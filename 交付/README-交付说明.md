@@ -20,6 +20,11 @@ bootstrap 只创建 `.venv` 并安装固定版本的 Python dependencies，不�
 Git、AO Desktop/CLI 或 Codex CLI。后三者及 Codex ChatGPT 登录在运行 Mission 时
 仍是外部 prerequisite。
 
+正常 Mission 启动通过 Panel/CLI 共用的 read-only preflight 检查这些 prerequisite、
+AO Project Git worktree/identity 和生产模型配置；它不会调用 Codex 模型或安装工具。
+最终 artifact 的唯一边界由 `release-manifest.txt` 定义，`build-release.ps1` 只从 clean
+HEAD 的 tracked blobs 构建 repo 外 staging 与 zip。
+
 ## 当前产品边界
 
 AO 负责 Project、Session、Conversation、Agent Runtime、worktree 和 PR/SCM。
@@ -138,9 +143,9 @@ R2-0 已从当前生产主路径移除开发者绝对 AO 路径。AO Desktop 是
   `ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录，也不伪造 demo Project。
 
 上述结论只表示“运行时路径可移植”，不表示“任意用户零配置安装”。clean-machine
-Python bootstrap 已提供；AO/Codex/Git Mission preflight、AO 首次配置 UX 与 clean
-artifact builder 仍未完成。Panel 已能选择 AO 中的已注册 Project，但 Project 创建、
-注册和修改仍由 AO 负责。当前交付不能宣称为通用安装包或解压即用产品。
+Python bootstrap、AO/Codex/Git Mission preflight 与 clean artifact builder 已提供；
+clean-release rehearsal、AO 首次配置 UX 和真实 AO/Codex 彩排仍未完成。Panel 已能
+选择 AO 中的已注册 Project，但 Project 创建、注册和修改仍由 AO 负责。
 
 ## 当前实现与阶段事项
 
@@ -169,8 +174,8 @@ artifact builder 仍未完成。Panel 已能选择 AO 中的已注册 Project，
 - fingerprint/source 与 thread revision 继续保持低优先级。
 
 Project selector 已完成；Project 注册本身仍由 AO 负责，其他首次配置 UX 继续归
-后续任务。R5-2 已提供 clean-machine Python bootstrap，Mission preflight 与 clean
-artifact builder 留给后续批次。历史 Mission 查看/resume 保留已持久化的
+后续任务。R5-2 已提供 clean-machine Python bootstrap，R5-3 已实现 shared Mission
+preflight、allowlist builder 与 release-safe sample。历史 Mission 查看/resume 保留已持久化的
 `project_id`；CLI 仍通过
 Mission JSON 显式提供 `project_id`。若未来需要主分支交付，用户显式 SCM 操作也应
 作为独立设计处理。legacy `AO_DATA_DIR` parallel runtime 已在 R2 收敛；当前

@@ -26,6 +26,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
 bootstrap 只创建本目录的 `.venv` 并安装 `requirements.txt` 中的 Python package；
 它不会安装 Python、Git、AO 或 Codex，也不会连接 AO 或调用模型。
 
+真实 Mission 启动前，Panel 与 CLI 复用同一 preflight：检查当前进程为 CPython
+3.12、选中 AO Project 是具有有效 Git identity 的 Git worktree、AO daemon/API
+可读取该 Project、Codex CLI 已通过 ChatGPT 登录，以及四个生产模型配置非空。
+preflight 不安装外部工具、不调用模型，也不检查目标项目自己的 Gate dependencies。
+
 安装后可执行自验证：
 
 ```powershell
@@ -77,9 +82,12 @@ tasks/e2e-smoke.json       固定标准 E2E 输入（不自动执行）
 tests/
 ```
 
-`tasks/e2e-smoke.json` 当前仅是标准 smoke fixture/template；直接通过 CLI 重复执行前
-必须使用新的唯一 `mission_id`，Panel 后续若增加“标准 Smoke”入口，应自动生成唯一
-Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
+`tasks/e2e-smoke.json` 是标准 smoke template，`tasks/mission-quick.json` 是 operator
+template。两者的 `project_id` 均为 `REPLACE_WITH_AO_PROJECT_ID`；CLI 运行前必须复制
+或修改为 AO 中已注册 Project 的真实 ID，并在重复执行时换成唯一 `mission_id`。
+placeholder 会在创建 runtime 前得到明确错误。正常使用 Panel 时，通过 Project
+selector 选择真实 AO Project，无需编辑 template。不得删除旧 `runtime` 来伪装成
+新 Mission。
 
 ## 当前边界
 
@@ -114,9 +122,10 @@ Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
   `project_id`，不受当前 selector 值影响；`run_mission.py` CLI 仍通过 Mission JSON
   显式提供 `project_id`，不增加 selector 语义。
 - AO runtime discovery/path contract 已完成可移植化，legacy `AO_DATA_DIR` parallel
-  runtime 已在 R2 收敛。R5-2 已提供 clean-machine Python bootstrap；当前仍不是
-  解压即用产品，因为 AO/Codex/Git Mission preflight 和 clean artifact builder 尚待
-  后续 R5 批次完成。
+  runtime 已在 R2 收敛。R5-2 已提供 clean-machine Python bootstrap；R5-3 增加了
+  shared Mission preflight，并以 `交付/release-manifest.txt` 为唯一 allowlist authority，
+  由 `交付/build-release.ps1` 从 clean HEAD 构建 repo 外 artifact。clean-release
+  rehearsal 与真实 AO/Codex 彩排仍待 R5-4/R5-5。
 - Competition runtime 不提供自动 push。
 
 ## 验证
