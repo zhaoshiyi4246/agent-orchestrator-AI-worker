@@ -4,6 +4,34 @@
 [`docs/PROJECT.md`](../../docs/PROJECT.md)，交付侧说明见
 [`../ARCHITECTURE-v0.2.md`](../ARCHITECTURE-v0.2.md)。
 
+## 首次安装
+
+Prerequisites：
+
+- Windows；
+- CPython 3.12.x；
+- Git（运行 Mission 时需要）；
+- AO Desktop/CLI（运行 Mission 时需要）；
+- Codex CLI，并已使用 ChatGPT 登录（运行 Mission 时需要）。
+
+方式 A：双击 `启动面板.bat`。缺少 `.venv` 或必要 Python package 时，启动器会
+自动运行 `bootstrap.ps1`，然后启动 Panel。
+
+方式 B：在本目录手动运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+bootstrap 只创建本目录的 `.venv` 并安装 `requirements.txt` 中的 Python package；
+它不会安装 Python、Git、AO 或 Codex，也不会连接 AO 或调用模型。
+
+安装后可执行自验证：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest .\tests -q
+```
+
 ## 运行路径
 
 ```text
@@ -86,8 +114,9 @@ Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
   `project_id`，不受当前 selector 值影响；`run_mission.py` CLI 仍通过 Mission JSON
   显式提供 `project_id`，不增加 selector 语义。
 - AO runtime discovery/path contract 已完成可移植化，legacy `AO_DATA_DIR` parallel
-  runtime 已在 R2 收敛。当前仍不是解压即用产品，因为 dependency bootstrap、
-  preflight 和 clean-machine first-run 尚待 R5 完成。
+  runtime 已在 R2 收敛。R5-2 已提供 clean-machine Python bootstrap；当前仍不是
+  解压即用产品，因为 AO/Codex/Git Mission preflight 和 clean artifact builder 尚待
+  后续 R5 批次完成。
 - Competition runtime 不提供自动 push。
 
 ## 验证
