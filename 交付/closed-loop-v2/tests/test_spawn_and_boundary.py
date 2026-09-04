@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock
 
@@ -159,6 +160,105 @@ def test_spawn_retry_cap_and_backoff(tmp_path, monkeypatch):
                         lambda: 99999)
     assert ex.spawn_initial_worker(task) is None
     assert store.counter_get("spawn_attempts:" + task.task_id) == 3
+
+
+def test_default_branch_spawn_failure_is_persistent_and_persisted(
+        tmp_path, monkeypatch):
+    ex, store = _executor(tmp_path)
+    task = TaskSpec.from_dict(_task_spec())
+    failure = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="",
+        stderr="DEFAULT_BRANCH_UNRESOLVED: default branch is unresolved")
+    monkeypatch.setattr(ex, "_run", lambda *_args, **_kwargs: failure)
+
+    assert ex.spawn_initial_worker(task) is None
+
+    assert store.counter_get("spawn_attempts:" + task.task_id) == 1
+    assert store.counter_get("spawn_transient:" + task.task_id) == 0
+    row = store._conn.execute(
+        "SELECT alert_id, payload_json FROM alerts").fetchone()
+    payload = json.loads(row[1])
+    assert row[0].startswith("spawn-failure:%s:persistent:1:"
+                             % task.task_id)
+    assert payload == {
+        "alert_type": "SPAWN_FAILURE",
+        "task_id": task.task_id,
+        "classification": "persistent",
+        "attempt": 1,
+        "summary": ("DEFAULT_BRANCH_UNRESOLVED: default branch is "
+                    "unresolved"),
+    }
+
+
+def test_spawn_classifier_uses_network_text_after_300_chars(
+        tmp_path, monkeypatch):
+    ex, store = _executor(tmp_path)
+    task = TaskSpec.from_dict(_task_spec())
+    failure = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="",
+        stderr=("x" * 350) + " upstream connection timed out")
+    monkeypatch.setattr(ex, "_run", lambda *_args, **_kwargs: failure)
+
+    assert ex.spawn_initial_worker(task) is None
+
+    assert store.counter_get("spawn_transient:" + task.task_id) == 1
+    assert store.counter_get("spawn_attempts:" + task.task_id) == 0
+
+
+def test_spawn_failure_alert_is_bounded_and_sanitized(tmp_path, monkeypatch):
+    ex, store = _executor(tmp_path)
+    task = TaskSpec.from_dict(_task_spec())
+    home = str(Path.home())
+    secret = (
+        "DEFAULT_BRANCH_UNRESOLVED Authorization: Bearer bearer-secret "
+        "OPENAI_API_KEY=api-secret token=token-secret Cookie=cookie-secret "
+        + home + "\\private [request host/request-credential] "
+        "--prompt private prompt text --model gpt-5.6-sol " + "z" * 2000)
+    failure = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="", stderr=secret)
+    monkeypatch.setattr(ex, "_run", lambda *_args, **_kwargs: failure)
+
+    assert ex.spawn_initial_worker(task) is None
+
+    payload_json = store._conn.execute(
+        "SELECT payload_json FROM alerts").fetchone()[0]
+    payload = json.loads(payload_json)
+    assert payload["alert_type"] == "SPAWN_FAILURE"
+    assert payload["classification"] == "persistent"
+    assert "DEFAULT_BRANCH_UNRESOLVED" in payload["summary"]
+    assert len(payload["summary"]) <= 1600
+    for forbidden in (
+            "bearer-secret", "api-secret", "token-secret", "cookie-secret",
+            home, "request-credential", "private prompt text"):
+        assert forbidden not in payload_json
+
+
+def test_spawn_budget_detail_includes_last_sanitized_root_cause(
+        tmp_path, monkeypatch):
+    ex, _store = _executor(tmp_path, cap=1)
+    task = TaskSpec.from_dict(_task_spec())
+    failure = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="",
+        stderr="DEFAULT_BRANCH_UNRESOLVED: configure default branch")
+    monkeypatch.setattr(ex, "_run", lambda *_args, **_kwargs: failure)
+
+    assert ex.spawn_initial_worker(task) is None
+
+    detail = ex.spawn_budget_detail(task.task_id)
+    assert "persistent 1/1, transient 0/8" in detail
+    assert "last spawn failure: DEFAULT_BRANCH_UNRESOLVED" in detail
+
+
+def test_successful_spawn_records_no_failure_alert(tmp_path, monkeypatch):
+    ex, store = _executor(tmp_path)
+    task = TaskSpec.from_dict(_task_spec())
+    success = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="spawned session worker-ok\n",
+        stderr="")
+    monkeypatch.setattr(ex, "_run", lambda *_args, **_kwargs: success)
+
+    assert ex.spawn_initial_worker(task) == "worker-ok"
+    assert store._conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0] == 0
 
 
 def test_spawn_success_clears_retry_counters(tmp_path, monkeypatch):
