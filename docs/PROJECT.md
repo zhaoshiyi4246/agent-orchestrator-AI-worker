@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap 与 R5-3 shared preflight/allowlist builder 已实施，下一步为 R5-4 clean release rehearsal
+- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder 与 R5-4 clean release rehearsal 已完成，下一步为 R5-5 final live rehearsal
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -650,8 +650,8 @@ UI → 绕过 MissionController 改状态
   push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
 - R4：Project selector 已完成；其余继续收敛配置和高风险功能；
-- R5：进行中；boundary audit、Python bootstrap、shared preflight 与 allowlist builder
-  已实施，下一步执行 clean release rehearsal。
+- R5：进行中；boundary audit、Python bootstrap、shared preflight、allowlist builder
+  与 clean release rehearsal 已完成，下一步执行 final live rehearsal。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。R2 Closure Audit 已 PASS，duplicate / legacy
@@ -660,7 +660,10 @@ current production/test refs 均为 0。历史来源继续保留在 Git repo，�
 competition release artifact。R5-1 boundary audit 与 R5-2 bootstrap 已完成；R5-3
 以 `交付/release-manifest.txt` 为唯一 package authority，通过
 `交付/build-release.ps1` 从 clean HEAD tracked tree 构建 repo 外 staging/zip，并将
-两个 sample 的 Project 改为显式 placeholder。下一步是 R5-4 Clean Release
+两个 sample 的 Project 改为显式 placeholder。R5-4 已从 main clean HEAD 构建最终
+ZIP，并只使用第二个全新目录中的 ZIP 解压内容完成两次 bootstrap、423 项 artifact
+测试、compileall、deterministic dry-run、Panel offline import、独立 SHA256SUMS、
+Markdown link 与 hygiene 验证；没有调用真实 AO/Codex。下一步是 R5-5 Final Live
 Rehearsal；尚未完成真实 AO/Codex Mission 或 GUI 彩排，也不改变现有
 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 

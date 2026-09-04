@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R5 clean delivery / first-run
-- 当前任务：R5-3 Preflight + Clean Artifact Builder
-- 当前状态：R5-2 bootstrap 已完成；`ALLOWLIST_RELEASE` 已由唯一 manifest 与 clean-HEAD builder 实现，Panel/CLI 复用 shared Mission preflight。
-- 下一步：R5-4 Clean Release Rehearsal
+- 当前任务：R5-4 Clean Release Rehearsal
+- 当前状态：从 main clean HEAD 构建的最终 ZIP 已在全新 repo 外目录完成 extract、bootstrap、self-test、compile、deterministic dry-run 与 Panel offline import；R5-4 PASS。
+- 下一步：R5-5 Final Live Rehearsal
 
 ## 一、更新规则
 
@@ -33,7 +33,7 @@
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 已完成 |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
-| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（preflight/release builder） |
+| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（final live rehearsal） |
 
 ## 三、R0 验收条件
 
@@ -626,6 +626,19 @@ AO daemon/Project、Codex ChatGPT 登录和生产模型配置；该检查不调�
 `SHA256SUMS.txt`。两个 sample 已改用 `REPLACE_WITH_AO_PROJECT_ID`，不恢复 demo
 fallback。下一步为 R5-4 Clean Release Rehearsal；本批未运行 AO Worker、Codex live、
 完整 Mission 或 GUI。
+
+R5-4 Clean Release Rehearsal 已 PASS。以 main
+`f9905aa37bb5ffb8f5480710682e3fd760df75fc` 构建的
+`closed-loop-v2-f9905aa37bb5.zip` SHA-256 为
+`d499627523b43eed8af2a0e308425dd3fb59352acb52b0fad0d2a3d0ad379edf`。
+彩排只使用 ZIP 在第二个全新 repo 外目录中的解压内容：pre-bootstrap hygiene 与
+historical/generated 禁入项均为 0；95 条 `SHA256SUMS.txt` 独立重算 missing/mismatch/
+extra 均为 0；3 个本地 Markdown 链接 missing 为 0。bootstrap 首次创建 CPython
+3.12.7 venv，第二次复用且未重建，PyYAML 6.0.3、pytest 9.1.1；artifact 全量测试为
+`423 passed in 73.33s`，compileall、deterministic single-worker dry-run 与 Panel
+offline import 均通过，dry-run/import 前后没有 runtime。原始 ZIP 哈希保持不变；
+未调用真实 AO、Codex login/model、Worker、完整 Mission 或 GUI。下一步为 R5-5
+Final Live Rehearsal。
 
 ## 十二、停止条件
 
