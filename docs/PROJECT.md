@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；当前进入 R5 clean delivery / first-run
+- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap 与 R5-3 shared preflight/allowlist builder 已实施，下一步为 R5-4 clean release rehearsal
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -151,8 +151,11 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   timeout 和 runfile，不读取 `ao.db`、`AO_DATA_DIR` 或 AO worktree 根目录；AO
   不可用时返回明确错误，不构造 demo Project。
 - 新建 Panel Mission 必须由用户选择一个已注册 AO Project。浏览器只提交
-  `project_id`；`POST /api/mission` 在创建 runtime/Worker 前重新查询 AO Project
-  列表，拒绝缺失/未知 ID、空 path，以及 `Path(path).is_dir()` 不成立的项目。
+  `project_id`；Panel 与 CLI 在创建 runtime/StateStore/Worker 前复用
+  `run_mission.mission_preflight()`，通过 AOAdapter 重新查询 Project registry，拒绝
+  placeholder、缺失/未知 ID、空或不存在的 path，并确认该路径为具有 Git identity
+  的 Git worktree。preflight 还检查 CPython 3.12、AO daemon/API、Codex ChatGPT
+  登录和四个生产模型配置；不调用模型，也不检查目标项目 Gate dependencies。
   Panel 不再隐式回退 `closed-loop-demo`，也不自动选择、创建、注册或修改其它
   Project。Project 注册仍由 AO 负责；CLI 仍从 Mission JSON 显式读取
   `project_id`。历史 Mission 的查看和 resume 继续使用 StateStore 中已持久化的
@@ -647,16 +650,19 @@ UI → 绕过 MissionController 改状态
   push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
 - R4：Project selector 已完成；其余继续收敛配置和高风险功能；
-- R5：进行中，从 Clean Release Boundary Audit 开始处理 CI、全新安装、真实 Demo
-  与干净交付。
+- R5：进行中；boundary audit、Python bootstrap、shared preflight 与 allowlist builder
+  已实施，下一步执行 clean release rehearsal。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。R2 Closure Audit 已 PASS，duplicate / legacy
 convergence 已关闭；当前 v2 production authority 单一，已退休 legacy source 的
 current production/test refs 均为 0。历史来源继续保留在 Git repo，但不应进入最终
-competition release artifact。下一步为 R5-1 Clean Release Boundary Audit；clean
-artifact、dependency bootstrap、preflight 与 clean-machine first-run 均由 R5 后续
-任务决定，不改变现有 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
+competition release artifact。R5-1 boundary audit 与 R5-2 bootstrap 已完成；R5-3
+以 `交付/release-manifest.txt` 为唯一 package authority，通过
+`交付/build-release.ps1` 从 clean HEAD tracked tree 构建 repo 外 staging/zip，并将
+两个 sample 的 Project 改为显式 placeholder。下一步是 R5-4 Clean Release
+Rehearsal；尚未完成真实 AO/Codex Mission 或 GUI 彩排，也不改变现有
+Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 
 ## 十、明确非目标
 

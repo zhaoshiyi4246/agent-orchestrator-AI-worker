@@ -1,6 +1,6 @@
 {
   "mission_id": "MISSION-E2E-SMOKE",
-  "project_id": "closed-loop-demo",
+  "project_id": "REPLACE_WITH_AO_PROJECT_ID",
   "objective": "在 app.py 新增 clamp01_e2e(x)",
   "allowed_paths": ["app.py"],
   "forbidden_paths": [".git/**"],

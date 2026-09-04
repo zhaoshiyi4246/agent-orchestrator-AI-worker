@@ -1,6 +1,6 @@
 {
   "mission_id": "MISSION-QUICK-001",
-  "project_id": "closed-loop-demo",
+  "project_id": "REPLACE_WITH_AO_PROJECT_ID",
   "objective": "在 app.py 中新增函数 square(a) 返回 a*a；在 math2.py 中新增函数 cube(a) 返回 a*a*a。各配一个 pytest 测试（tests/test_square.py、tests/test_cube.py），全部测试通过。",
   "allowed_paths": ["app.py", "math2.py", "tests/test_square.py", "tests/test_cube.py"],
   "forbidden_paths": [".git/**", "*.md"],

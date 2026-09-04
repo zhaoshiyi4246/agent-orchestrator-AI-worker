@@ -50,7 +50,7 @@ def repair_json(raw: str) -> str:
       backslash + single quote (JS)   -> drop the backslash
       any other backslash             -> escape it (treat as literal)
 
-    The \\u case is special: Windows paths like ``C:\\users\\lenovo`` contain
+    The \\u case is special: Windows paths like ``C:\\sample\\user`` contain
     ``\\u`` followed by non-hex chars; naively keeping ``\\u`` produces invalid
     JSON (``\\u`` must be followed by exactly 4 hex digits). Only a genuine
     ``\\uXXXX`` is preserved.
@@ -63,7 +63,7 @@ def repair_json(raw: str) -> str:
             nxt = raw[i + 1]
             if nxt == "u":
                 # keep only a genuine \uXXXX; otherwise the backslash is a
-                # lone backslash (e.g. Windows path C:\users\...).
+                # lone backslash (e.g. Windows path C:\sample\...).
                 if i + 5 < n and _is_hex(raw[i + 2:i + 6]):
                     out.append(c)
                     out.append(nxt)
