@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R2 duplicate / legacy convergence
-- 当前任务：R2-1 AOClient / old Observer Island Retirement
-- 当前状态：AOClient / old Observer Island Audit PASS；删除无 current production/test/public-contract caller 的 legacy v2 `ao_client.py` 与 `observer.py`，不迁移旧 snapshot/trigger，不增加 compatibility shim；定向 48 项与完整离线 387 项均通过，compileall 与 diff-check 退出 0
-- 下一步：进入旧 `integration_gate.py` 独立 retirement audit
+- 当前任务：R2-1 Gate Integrity Migration + Legacy Integration Gate Retirement
+- 当前状态：Gate retirement audit PASS；已将唯一必要 safety property——Gate repository integrity——迁入当前 `mission_gate.py`，并删除无 current caller 的 legacy v2 `integration_gate.py`；定向 61 项与完整离线 404 项均通过，compileall、diff-check 与 current production/tests legacy reference scan 均通过
+- 下一步：R2 closure audit
 
 ## 一、更新规则
 
@@ -444,7 +444,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 |---|---|---|---|
 | K1 | 旧架构文档与代码主路径不一致 | R1 | 已解决：当前 README、交付说明、架构文档、PROJECT 和前端均与真实主路径一致 |
 | K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
-| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 部分收敛：v2 三套 legacy CLI、旧 AO Chat protocol 与 AOClient/old Observer island 已退休；旧 `integration_gate.py` 进入下一独立审计 |
+| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 已收敛当前 v2：三套 legacy CLI、旧 AO Chat protocol、AOClient/old Observer island 与旧 `integration_gate.py` 均已退休；当前只保留正式边界 |
 | K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已解决：新 Mission 默认 1；值为 1 时确定性单 lane 且不调用 decomposition Planner；显式选择 2 时 Planner 可返回 1 或 2 |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
@@ -484,7 +484,7 @@ workspace API PR 中以 AO 官方 loopback endpoint 取代 Worker workspace 内�
 推导。Competition behavior 主路径和 Project selector 完成后，当前工作已切回
 duplicate / legacy convergence。删除前仍必须有测试和入口证据。
 
-#### R2-1 Reference Graph Audit、Batch 1、Batch 2A、Batch 2B、Protocol 与 AOClient/old Observer Island Retirement
+#### R2-1 Reference Graph Audit、Legacy Retirement 与 Gate Integrity Migration
 
 Reference Graph Audit 已完成并确认 `llm_env.py` 从 `run_mission.py`、
 `panel/server.py` 与 Controller production roots 不可达；生产 Planner、Auditor、
@@ -542,6 +542,25 @@ compatibility shim。当前 AO 读写继续分别由 `AOAdapter` 与 `ActionExec
 `integration_gate.py`。当前边界相关定向回归为 `48 passed in 22.65s`，完整离线
 基线为 `387 passed in 120.29s`；compileall 与 `git diff --check` 均退出 0。
 
+旧 Integration Gate retirement audit 已审计 PASS，结论为
+`MIGRATE_ONE_REQUIRED_SAFETY_PROPERTY_THEN_RETIRE`。审计确认 legacy v2
+`integration_gate.py` 无 current production/test/public-contract caller，同时发现当前
+`mission_gate.py` 的 `CURRENT_GAP`：HEAD probe failure 可被吞掉，且 Gate 命令可在
+exit 0 时改变 index、tracked/untracked 内容或 HEAD 而仍被视为通过。
+
+本批只迁移 Gate repository integrity。`worktree.py` 提供只读、内容敏感 snapshot，
+覆盖 HEAD、完整 cached/unstaged diff 摘要，以及 non-artifact untracked path 与内容
+hash，并复用既有 artifact 语义。Task/Completion Gate 允许 initial dirty，但前后状态
+必须一致；Final Gate 要求 initial clean。所有必要 Git/file probe failure 均 fail
+closed；Final integrity failure 直接进入 `HUMAN` 并跳过 Mission Verifier。Gate 命令
+失败的既有 baseline-only tolerance 仅在 integrity PASS 时保留。旧 Gate 的逐命令
+probe、`IntegrationGateResult`/`GateStepResult` DTO 与字符串 evidence 协议不迁移。
+新回归通过后已删除 legacy v2 `integration_gate.py`，不增加 shim/alias/re-export，且
+不修改 `clao-src` 或 `ao-supervision-sidecar` 历史来源。Gate 定向回归为
+`61 passed in 47.18s`，完整离线基线为 `404 passed in 74.52s`；compileall、
+`git diff --check` 与 current production/tests legacy reference scan 均通过。下一步为
+R2 closure audit。
+
 ### R3
 
 完整 E2E 后优先做 Competition behavior convergence：
@@ -588,8 +607,9 @@ event freshness、默认单 Worker、自动 SCM 副作用移除与 R4 Project se
 legacy Mission/ClosedLoop CLI，Batch 2B 继续退休 legacy supervision CLI；两批均不
 运行 AO Worker、Codex live、Mission 或 E2E。Protocol retirement 继续删除无 caller
 的旧 AO Chat wire contract，AOClient / old Observer island retirement 删除无 caller
-的旧 Client/Observer 组合。下一步进入旧 `integration_gate.py` 独立 retirement audit；
-其余配置/高风险边界、重复模块清理与 clean delivery/
+的旧 Client/Observer 组合；Gate integrity migration 迁移唯一必要 safety property 并
+退休无 caller 的旧 Integration Gate。下一步进入 R2 closure audit；其余配置/高风险
+边界、重复模块清理与 clean delivery/
 installer/first-run 继续分批推进。
 
 ## 十二、停止条件

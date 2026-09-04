@@ -49,6 +49,17 @@ def _loop(tmp_path, *, dry=False):
                      store=store, dry_run=dry), task, store
 
 
+def _commit_fixture(repo):
+    subprocess.run(["git", "init", "-q"], cwd=str(repo), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(repo),
+                   check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(repo),
+                   check=True)
+    subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=str(repo),
+                   check=True)
+
+
 def test_gate_pass(tmp_path):
     store = StateStore(tmp_path / "cl.db")
     gate = IntegrationGate(store)
@@ -66,6 +77,7 @@ def test_gate_pass(tmp_path):
         "def test_zero():\n from app import divide\n"
         " import pytest\n"
         " with pytest.raises(ValueError):\n  divide(1,0)\n", encoding="utf-8")
+    _commit_fixture(d)
     task = TaskSpec.from_dict(_task_spec())
     run = gate.run(task, str(d))
     assert run.ok
@@ -82,6 +94,7 @@ def test_gate_failure(tmp_path):
     (d / "tests" / "test_divide.py").write_text(
         "def test_ok():\n from app import divide\n assert divide(6,3)==2\n",
         encoding="utf-8")
+    _commit_fixture(d)
     task = TaskSpec.from_dict(_task_spec())
     run = gate.run(task, str(d))
     assert not run.ok

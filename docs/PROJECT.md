@@ -80,7 +80,8 @@ Batch 2B 退休。v0.2 不再维护独立 supervision/watch CLI。AO events 由�
 MissionController/ClosedLoop 路径读取并写入 StateStore，再由 StoreBusProjector、
 UI、Markdown 与 JSONL 提供派生视图。R2 protocol retirement 已删除 legacy v2
 `protocol.py`；R2 island retirement 已删除 legacy v2 `ao_client.py` 与
-`observer.py`，旧 `integration_gate.py` 留待后续独立审计。
+`observer.py`。R2 Gate retirement 已删除 legacy v2 `integration_gate.py`；
+`mission_gate.py` 是当前唯一正式 Gate。
 
 R2-0 后，Panel 与 `run_mission.py` CLI 继续复用同一个 `build_runtime()`，并共享同一份 AO
 运行时解析结果。AO Desktop 是外部依赖：CL-AO 不携带、不安装也不自动启动
@@ -195,6 +196,15 @@ Completion Auditor、completion Planner 或 Task Verifier。Gate FAIL 仍进入
 `changed_paths == None`、workspace/base 不可审计或其他任一条件不足时，继续原有
 Completion Auditor → Planner 路径；`WORKER_RETRYING` completion 不使用 fast path。
 
+`mission_gate.IntegrationGate` 是当前唯一正式 Gate。Task Gate 与 Completion Audit
+Gate 允许 Worker worktree 初始存在合法 non-artifact dirty 内容，但 Gate 前后的 HEAD、
+index、tracked working-tree 内容以及 untracked path/content 必须完全一致；正常
+`__pycache__`、pytest/mypy/ruff cache、coverage、tox、hypothesis 与 eggs artifact
+沿用 worktree 层统一过滤。Final Gate 额外要求 integration worktree 初始 clean。
+任一必要 Git probe 或 untracked 文件读取/解析失败均确定性 fail closed；Final Gate
+完整性失败直接将 Mission 置为 `HUMAN`，不调用 Mission Verifier。旧 Gate 的逐命令
+Git probe、DTO 和字符串 evidence 协议没有迁移。
+
 Mission shared routing 每个 project 每 tick 仍只调用一次
 `get_recent_events(project_id, since=0)`。该结果按 replay/full-history snapshot 处理：
 不使用 project-wide max sequence，而是在 `_route_events()` 中复用子任务
@@ -215,8 +225,9 @@ activity cursor 只是同一进程的路由边界；`fresh_errors` 还必须通�
 `VERIFIER_PENDING` 状态、VerifierProvider/VerifierResult 与完整 task verifier 路径
 仍保留：历史 runtime 若已持久化在 `VERIFIER_PENDING`，`ClosedLoop.step()` 会继续
 调用 Verifier，并按原有 PASS/FAIL、provider retry、budget 与 crash-resume 语义完成
-恢复。Mission-level Final Gate 与 Mission Verifier 完全保留；final gate PASS +
-verifier PASS 仍得到 `MISSION_DONE` 并写入 mission-level verification row。
+恢复。Mission-level Final Gate 与 Mission Verifier 完全保留；只有 Final Gate
+repository integrity 通过，且命令通过或仅命中既有 baseline failures 时，Verifier
+PASS 才得到 `MISSION_DONE` 并写入 mission-level verification row。
 `MISSION_DONE` 表示 verified integration 已通过 Final Gate 与 Mission Verifier，
 结果保留在 `runtime/<mission-id>/integration`；它不修改用户 `master`/`main`，
 也不 push `origin`。未来若需要将结果交付到主分支，应设计为用户显式 SCM 操作，
@@ -305,7 +316,7 @@ panel /api/directive
 |---|---|---|---|
 | `ao_adapter.py` / `ActionExecutor` | `AOAdapter` 是当前唯一 AO REST/SSE 读取边界；`ActionExecutor` 是当前 Worker spawn/send/kill 写边界 | legacy `ao_client.py` 与只依赖它的旧 `observer.py` 已在 R2 island retirement 删除 | 保留当前读写边界；不恢复 httpx AOClient 或 parallel runfile discovery |
 | `event_observer.py` | `event_observer.Observer` 是当前唯一确定性告警规则入口 | legacy `observer.py` 无 production/test/public-contract caller，已随 AOClient island 退休 | 保留当前 `REPEATED_ERROR` / `NO_PROGRESS` 路径；不迁移旧 MILESTONE/STALL snapshot loop |
-| `mission_gate.py` / `integration_gate.py` | 使用 `mission_gate.IntegrationGate` | `mission_gate.py` 被当前 Controller 和测试使用；`integration_gate.py` 无运行入口引用 | 保留前者；后者与 CL-AO 来源一起审计 |
+| `mission_gate.py` | 当前唯一正式 Gate；Controller 与测试直接使用 `mission_gate.IntegrationGate` | legacy `integration_gate.py` 无 production/test/public-contract caller，已在 R2 retirement 删除 | 保留当前 Gate；不恢复旧逐命令 Git probe、DTO 或字符串 evidence 协议 |
 | `mission_contracts.py` | 当前唯一 Mission/Task/Audit/Planner/Verifier contract | 当前模块、测试和对应 JSON schemas 广泛使用；legacy `protocol.py` 已退休 | 保留当前 contracts；不恢复旧 camelCase AO Chat DTO |
 | 已退休 legacy CLI / `run_mission.py` | 面板和当前 CLI 只走 `run_mission.py` | `mission_cli.py`、`closed_loop_cli.py` 与 `cli.py` 已分别在 Batch 2A/2B 退休 | `run_mission.py` 是唯一 CLI runner；v0.2 不再维护独立 supervision/watch CLI |
 
@@ -313,7 +324,8 @@ panel /api/directive
 island audit 证明 legacy v2 `observer.py` 在删除前与 CL-AO 对应文件相同；当前 v2
 `ao_client.py` / `observer.py` 与 `protocol.py` copy 均已退休。`clao-src` 和
 `ao-supervision-sidecar` 各自的历史副本、测试与 callers 仍完整保留在历史来源目录，
-不受当前 v2 删除影响。`integration_gate.py` 与其它重复来源继续按后续独立审计处理。
+不受当前 v2 删除影响。legacy v2 `integration_gate.py` 也已退休；历史来源目录中的
+独立 Gate 副本保持不变。
 
 ### 5. R2-0 AO 外部运行时边界
 
@@ -337,7 +349,8 @@ AO Desktop `0.12.9` 的本机 probe 验证了以下当前契约：
   Batch 1 删除，损坏且无消费者的 `mission_cli.py` 与 `closed_loop_cli.py` 已在
   Batch 2A 退休，legacy supervision `cli.py` 已在 Batch 2B 退休。旧 AO
   Client/Observer island 已在独立 retirement 中删除且未迁移旧 snapshot/trigger；
-  旧 `integration_gate.py` 和依赖 `AO_DATA_DIR` 的历史测试夹具继续单独审计。
+  Gate retirement 只把 repository integrity 迁入当前 `mission_gate.py`，并删除无
+  caller 的旧 `integration_gate.py`；依赖 `AO_DATA_DIR` 的历史测试夹具仍保持历史边界。
 
 PR #6 的 live probe 曾从默认 runfile 解析到 daemon endpoint，`get_projects()`
 与 `ao status --json` 均成功，且未创建 Worker。本 workspace API 任务的离线
@@ -529,7 +542,9 @@ defer、gate-first 和 runtime watchdog 由 `ClosedLoop` / `MissionController` �
 确定性程序，负责：
 
 - 在明确 checkout 上运行显式 argv；
-- 检查 exit code、timeout、输出和 Git 不变量；
+- 检查 exit code、timeout、输出和 Gate 前后内容敏感的 Git repository integrity；
+- Task/Completion 上下文允许初始 dirty，Final 上下文要求初始 clean；
+- 对 Git probe failure、HEAD/index/working-tree/non-artifact untracked mutation fail closed；
 - 生成稳定证据。
 
 不解释语义，不直接给 Worker 指令。
@@ -639,8 +654,9 @@ R4 Project selector 已完成。当前工作已切回 R2 duplicate / legacy conv
 Reference Graph Audit 已完成，Batch 1 删除 production-unreachable 的 `llm_env.py`，
 Batch 2A/2B 已退休三个无 production caller 的 legacy CLI，protocol retirement
 已删除旧 AO Chat wire contract，AOClient / old Observer island retirement 已删除
-旧 Client/Observer 组合。下一步进入旧 `integration_gate.py` 独立 retirement audit；
-其余 R2 小批次与剩余 R4 边界、clean
+旧 Client/Observer 组合；Gate integrity migration 已补齐当前 Gate 的 repository
+integrity 缺口并退休旧 `integration_gate.py`。下一步进入 R2 closure audit；其余 R2
+小批次与剩余 R4 边界、clean
 delivery/installer/first-run 仍分别推进，不改变异常 Auditor/Planner、retry、
 alert/L0 或 Mission final 验证语义。
 
