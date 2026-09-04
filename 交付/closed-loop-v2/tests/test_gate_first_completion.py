@@ -1,4 +1,5 @@
 """Gate-first completion regressions for a clean first Worker attempt."""
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,7 @@ from loopcore.mission_contracts import (
     PlannerActionType,
     ProjectState,
 )
+from loopcore.mission_gate import IntegrationGate
 from tests.sidecar_port.test_verifier import _ScriptedVerifier, _loop
 from tests.sidecar_port.util import ev
 
@@ -150,6 +152,60 @@ def test_idle_changed_source_gate_fail_uses_auditor_and_planner(tmp_path):
         (ProjectState.AUDIT_PENDING,),
         (ProjectState.PLANNER_PENDING,),
     ]
+
+
+def test_task_gate_exit_zero_source_mutation_uses_failure_path(tmp_path):
+    loop, task, store, verifier = _running_loop(tmp_path)
+    task.gate_commands = [
+        '"%s" -c "from pathlib import Path; '
+        "p=Path('app.py'); p.write_text(p.read_text()+'# gate mutation')\""
+        % sys.executable]
+    loop.gate = IntegrationGate(store)
+    audit = AuditResult(
+        "A-GATE-INTEGRITY", task.task_id, AuditDecision.HUMAN,
+        [AuditEvidence("gate_repository_integrity", "gate changed source")],
+        "gate changed source", 1.0, ["AC-01"])
+    loop.auditor.audit = MagicMock(return_value=audit)
+    loop.planner.plan = MagicMock(return_value=PlannerAction(
+        "ACT-GATE-INTEGRITY", task.task_id, PlannerActionType.HUMAN,
+        reason="gate integrity failure requires human"))
+    loop.executor.execute = MagicMock(return_value=MagicMock(
+        ok=True, new_state=ProjectState.HUMAN,
+        new_worker_session_id=None, detail="halted"))
+    loop._transition(ProjectState.GATE_PENDING, "test", "setup", {})
+
+    loop._run_gate()
+
+    assert loop.state == ProjectState.HUMAN
+    assert loop.state != ProjectState.DONE
+    assert verifier.inputs == []
+    bundle = loop.auditor.audit.call_args.args[0]
+    assert "[gate repository integrity] Gate changed repository state" \
+        in bundle.test_output
+    assert store._conn.execute(
+        "SELECT exit_code FROM gate_runs WHERE task_id=? ORDER BY id DESC",
+        (task.task_id,)).fetchone()[0] == 0
+    assert store._conn.execute(
+        "SELECT count(*) FROM state_transitions WHERE task_id=? "
+        "AND to_state=? AND actor=?",
+        (task.task_id, ProjectState.AUDIT_PENDING,
+         "integration_gate")).fetchone()[0] == 1
+
+
+def test_completion_gate_capture_includes_integrity_failure(tmp_path):
+    loop, task, store, _verifier = _running_loop(tmp_path)
+    task.gate_commands = [
+        '"%s" -c "from pathlib import Path; '
+        "p=Path('app.py'); p.write_text(p.read_text()+'# capture mutation')\""
+        % sys.executable]
+    loop.gate = IntegrationGate(store)
+
+    run, test_output = loop._run_gate_capture()
+
+    assert run.command_ok is True
+    assert run.integrity_ok is False
+    assert "[gate repository integrity] Gate changed repository state" \
+        in test_output
 
 
 def test_empty_gate_commands_keep_completion_audit(tmp_path):

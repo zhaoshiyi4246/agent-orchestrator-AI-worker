@@ -1000,6 +1000,10 @@ class ClosedLoop:
             run = self.gate.run(self.task, worktree)
             test_output = "\n".join((r.get("stdout") or "") + (r.get("stderr") or "")
                                     for r in run.results)
+            integrity_error = getattr(run, "integrity_error", None)
+            if isinstance(integrity_error, str) and integrity_error:
+                test_output += ("\n[gate repository integrity] " +
+                                integrity_error[:1000])
             return run, test_output
         except Exception:
             return None, ""
@@ -1163,6 +1167,12 @@ class ClosedLoop:
             # re-enter audit with gate evidence (bounded by budgets)
             audit_id = make_id("AUDIT-GATE")
             if not self.store.audit_seen(audit_id):
+                test_output = "\n".join(
+                    r["stdout"] + r["stderr"] for r in run.results)
+                integrity_error = getattr(run, "integrity_error", None)
+                if isinstance(integrity_error, str) and integrity_error:
+                    test_output += ("\n[gate repository integrity] " +
+                                    integrity_error[:1000])
                 bundle = EvidenceBundle(
                     task_spec=self.task.to_dict(), alert=None,
                     worker_id=self.task.worker_session_id,
@@ -1170,8 +1180,7 @@ class ClosedLoop:
                     worker_status=self._worker_status(),
                     git_diff=self._git_diff(),
                     failed_criteria=[ac.id for ac in self.task.acceptance_criteria],
-                    test_output="\n".join(r["stdout"] + r["stderr"]
-                                          for r in run.results),
+                    test_output=test_output,
                     history={**self._fresh_history(),
                              "user_directives":
                                  self.role_directives["auditor"][-10:]})

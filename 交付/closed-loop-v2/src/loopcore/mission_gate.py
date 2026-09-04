@@ -8,10 +8,10 @@ TaskSpec.gate_commands, and NEVER through a shell (argv only): a gate command
 is author-controlled configuration, so `>`/`|`/`&&` are not interpreted — a
 command that needs a shell simply fails closed (visible in the evidence).
 
-HEAD-mutation watchdog: the gate captures `git rev-parse HEAD` before and
-after the command batch. A gate whose execution MOVES the ref (a test that
-commits, a hook that rewrites) invalidates 'diff vs frozen base' evidence;
-the mutation is surfaced as a deterministic finding for the Verifier.
+Repository-integrity watchdog: a read-only, content-sensitive Git snapshot is
+captured before and after the command batch.  Gate commands may inspect the
+Worker's existing dirty state, but may not change HEAD, index, tracked source,
+or non-artifact untracked content while producing verification evidence.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from . import worktree as wt
 from .mission_contracts import TaskSpec
 from .event_normalizer import now_iso
 from .state_store import StateStore
@@ -54,24 +55,18 @@ def _to_argv(cmd: str) -> List[str]:
     return parts
 
 
-def _head(repo: Path) -> Optional[str]:
-    """Current HEAD sha, or None when unavailable (fail-closed upstream)."""
-    try:
-        proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo),
-                              capture_output=True, text=True, timeout=30)
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    return (proc.stdout or "").strip() or None
-
-
 @dataclass
 class GateRun:
     ok: bool
     results: List[dict]
     head_before: Optional[str] = None
     head_after: Optional[str] = None
+    command_ok: bool = True
+    integrity_ok: bool = True
+    integrity_error: Optional[str] = None
+    initial_clean: Optional[bool] = None
+    state_digest_before: Optional[str] = None
+    state_digest_after: Optional[str] = None
 
     @property
     def head_mutated(self) -> bool:
@@ -84,7 +79,18 @@ class GateRun:
                "summary": ("pass" if self.ok else "fail") +
                           " commands=" + str(len(self.results)),
                "reference": "; ".join(
-                   "exit=%d" % r["exit_code"] for r in self.results)}]
+                   "exit=%s" % r.get("exit_code") for r in self.results)}]
+        if not self.integrity_ok:
+            ev.append({
+                "type": "gate_repository_integrity",
+                "summary": self.integrity_error or
+                           "Gate repository integrity failed",
+                "reference": (
+                    "initial_clean=%s; head_before=%s; head_after=%s; "
+                    "state_digest_before=%s; state_digest_after=%s" %
+                    (self.initial_clean, self.head_before, self.head_after,
+                     self.state_digest_before, self.state_digest_after)),
+            })
         if self.head_mutated:
             ev.append({"type": "gate_head_mutation",
                        "summary": "gate execution moved HEAD %s -> %s"
@@ -97,11 +103,26 @@ class IntegrationGate:
     def __init__(self, store: StateStore):
         self.store = store
 
-    def run(self, task: TaskSpec, worktree_path: str) -> GateRun:
+    def run(self, task: TaskSpec, worktree_path: str, *,
+            require_clean: bool = False) -> GateRun:
         results = []
-        ok = True
         cwd = Path(worktree_path)
-        head_before = _head(cwd)
+        try:
+            before = wt.git_state_snapshot(str(cwd))
+        except wt.GitStateSnapshotError as exc:
+            return GateRun(
+                ok=False, results=results, command_ok=False,
+                integrity_ok=False,
+                integrity_error=("pre-Gate Git probe failed: %s" %
+                                 str(exc)[:1000]))
+        if require_clean and not before.clean:
+            return GateRun(
+                ok=False, results=results, head_before=before.head,
+                command_ok=False, integrity_ok=False,
+                integrity_error="initial repository not clean",
+                initial_clean=False, state_digest_before=before.digest)
+
+        command_ok = True
         for cmd in task.gate_commands:
             started = now_iso()
             argv = _to_argv(cmd)
@@ -128,6 +149,34 @@ class IntegrationGate:
                 cwd=str(cwd), exit_code=exit_code, started_at=started,
                 ended_at=ended, stdout=stdout, stderr=stderr)
             if exit_code != 0:
-                ok = False
-        return GateRun(ok=ok, results=results,
-                       head_before=head_before, head_after=_head(cwd))
+                command_ok = False
+
+        try:
+            after = wt.git_state_snapshot(str(cwd))
+        except wt.GitStateSnapshotError as exc:
+            return GateRun(
+                ok=False, results=results, head_before=before.head,
+                command_ok=command_ok, integrity_ok=False,
+                integrity_error=("post-Gate Git probe failed: %s" %
+                                 str(exc)[:1000]),
+                initial_clean=before.clean,
+                state_digest_before=before.digest)
+
+        integrity_error = None
+        if before.head != after.head:
+            integrity_error = "Gate changed HEAD"
+        elif before.digest != after.digest:
+            integrity_error = "Gate changed repository state"
+        integrity_ok = integrity_error is None
+        return GateRun(
+            ok=command_ok and integrity_ok,
+            results=results,
+            head_before=before.head,
+            head_after=after.head,
+            command_ok=command_ok,
+            integrity_ok=integrity_ok,
+            integrity_error=integrity_error,
+            initial_clean=before.clean,
+            state_digest_before=before.digest,
+            state_digest_after=after.digest,
+        )

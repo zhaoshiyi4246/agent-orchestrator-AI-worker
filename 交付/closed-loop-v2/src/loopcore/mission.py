@@ -761,15 +761,26 @@ class MissionController:
         # any merge) — reuse it; the final diff is the whole mission's work.
         base = wt.freeze_base(integ, self.store, self.mission.mission_id,
                               scope="integration")
-        run = self.gate.run(
-            TaskSpec(task_id=self.mission.mission_id,
-                     project_id=self.mission.project_id,
-                     objective=self.mission.objective,
-                     allowed_paths=list(self.mission.allowed_paths),
-                     forbidden_paths=list(self.mission.forbidden_paths),
-                     acceptance_criteria=self.mission.acceptance_criteria,
-                     gate_commands=list(self.mission.gate_commands)),
-            integ)
+        final_task = TaskSpec(
+            task_id=self.mission.mission_id,
+            project_id=self.mission.project_id,
+            objective=self.mission.objective,
+            allowed_paths=list(self.mission.allowed_paths),
+            forbidden_paths=list(self.mission.forbidden_paths),
+            acceptance_criteria=self.mission.acceptance_criteria,
+            gate_commands=list(self.mission.gate_commands))
+        run = self.gate.run(final_task, integ, require_clean=True)
+        integrity_value = getattr(run, "integrity_ok", True)
+        integrity_ok = integrity_value \
+            if isinstance(integrity_value, bool) else True
+        if not integrity_ok:
+            detail = getattr(run, "integrity_error", None)
+            if not isinstance(detail, str) or not detail:
+                detail = "unknown repository integrity failure"
+            self._set_state(
+                "HUMAN", "final gate repository integrity failed: %s" %
+                detail[:1000])
+            return
         gate_output = "\n".join(
             "$ %s\n%s%s" % (r.get("command", ""), r.get("stdout", ""),
                             r.get("stderr", "")) for r in run.results)
@@ -784,12 +795,16 @@ class MissionController:
         # Legacy red tests are reported but never block MISSION_DONE; NEW
         # failures remain fatal (review 簇一).
         from .test_failures import extract_failure_ids
-        current_failures = extract_failure_ids(gate_output) if not run.ok \
+        command_value = getattr(run, "command_ok", run.ok)
+        command_ok = command_value \
+            if isinstance(command_value, bool) else bool(run.ok)
+        current_failures = extract_failure_ids(gate_output) if not command_ok \
             else []
         baseline = set(self._baseline_failures())
         new_failures = [f for f in current_failures if f not in baseline]
         legacy_failures = [f for f in current_failures if f in baseline]
-        gate_clean = run.ok or (current_failures and not new_failures)
+        gate_clean = integrity_ok and (
+            command_ok or (current_failures and not new_failures))
         findings = []
         if legacy_failures:
             findings.append("pre-existing (baseline) test failures, not "
@@ -798,7 +813,7 @@ class MissionController:
         if new_failures:
             findings.append("final gate commands failed on NEW failures: %s"
                             % ", ".join(new_failures))
-        elif not run.ok and not current_failures:
+        elif not command_ok and not current_failures:
             findings.append("final gate commands failed")
         inp = VerifierInput(
             task_spec=self.mission.to_dict(),
