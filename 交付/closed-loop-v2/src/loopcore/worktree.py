@@ -22,8 +22,11 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import os
+import stat
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -203,6 +206,155 @@ def _is_artifact(path: str) -> bool:
     """
     p = path.replace("\\", "/")
     return any(marker in p for marker in _ARTIFACT_MARKERS)
+
+
+@dataclass(frozen=True)
+class GitStateSnapshot:
+    """Content-sensitive, read-only state of a Git worktree.
+
+    ``digest`` distinguishes HEAD, the index, tracked working-tree content,
+    and non-artifact untracked path/content.  It intentionally omits the
+    underlying diffs so Gate evidence stays bounded.
+    """
+
+    head: str
+    digest: str
+    clean: bool
+
+
+class GitStateSnapshotError(RuntimeError):
+    """A required Git probe, parse, or untracked-file read failed."""
+
+
+def _snapshot_git(worktree: str, *args: str, timeout: int = 30) -> bytes:
+    """Run one required read-only Git probe and return its exact bytes."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", worktree, *args],
+            capture_output=True,
+            timeout=timeout,
+            shell=False,
+            check=False,
+        )
+    except Exception as exc:
+        raise GitStateSnapshotError(
+            "git %s could not run: %s" %
+            (" ".join(args[:3]), str(exc)[:500])) from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or b"").decode(
+            "utf-8", errors="replace").strip()
+        raise GitStateSnapshotError(
+            "git %s exited with code %d%s" %
+            (" ".join(args[:3]), proc.returncode,
+             (": " + detail[:500]) if detail else ""))
+    return proc.stdout or b""
+
+
+def _nul_paths(raw: bytes, probe: str) -> List[str]:
+    if raw and not raw.endswith(b"\0"):
+        raise GitStateSnapshotError("%s returned malformed path data" % probe)
+    try:
+        return [os.fsdecode(item) for item in raw.split(b"\0") if item]
+    except Exception as exc:
+        raise GitStateSnapshotError(
+            "%s path decoding failed: %s" % (probe, str(exc)[:500])) from exc
+
+
+def _non_artifact_diff(worktree: str, *, cached: bool) -> tuple[bytes, bytes]:
+    """Return (path-list bytes, full diff bytes) for one Git state layer."""
+    layer = "cached" if cached else "unstaged"
+    prefix = ["diff"] + (["--cached"] if cached else [])
+    raw_paths = _snapshot_git(
+        worktree, *prefix, "--name-only", "-z", "--no-renames",
+        "--no-ext-diff", "--no-textconv", "--")
+    paths = sorted(set(
+        path for path in _nul_paths(raw_paths, "git %s path probe" % layer)
+        if not _is_artifact(path)))
+    framed_paths = b"\0".join(os.fsencode(path) for path in paths)
+    if not paths:
+        return framed_paths, b""
+    pathspecs = [":(literal)%s" % path for path in paths]
+    diff = _snapshot_git(
+        worktree, *prefix, "--no-renames", "--no-ext-diff",
+        "--no-textconv", "--binary", "--full-index", "--", *pathspecs)
+    return framed_paths, diff
+
+
+def _hash_frame(hasher, label: bytes, payload: bytes) -> None:
+    hasher.update(label)
+    hasher.update(len(payload).to_bytes(8, byteorder="big"))
+    hasher.update(payload)
+
+
+def git_state_snapshot(worktree: str) -> GitStateSnapshot:
+    """Capture Gate-relevant repository state without changing it.
+
+    Required probes fail explicitly.  Tracked artifact paths and untracked
+    test/build artifacts use the same ``_is_artifact`` policy as the existing
+    path gate.  External diff drivers and textconv are disabled.
+    """
+    root = Path(worktree)
+    raw_head = _snapshot_git(worktree, "rev-parse", "HEAD")
+    try:
+        head = raw_head.decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise GitStateSnapshotError(
+            "git rev-parse HEAD returned non-ASCII data") from exc
+    if (len(head) not in (40, 64) or
+            any(ch not in "0123456789abcdefABCDEF" for ch in head)):
+        raise GitStateSnapshotError(
+            "git rev-parse HEAD did not return one commit SHA")
+
+    cached_paths, cached_diff = _non_artifact_diff(worktree, cached=True)
+    unstaged_paths, unstaged_diff = _non_artifact_diff(
+        worktree, cached=False)
+    raw_untracked = _snapshot_git(
+        worktree, "ls-files", "--others", "--exclude-standard", "-z", "--")
+    untracked_paths = sorted(set(
+        path for path in _nul_paths(raw_untracked, "git untracked path probe")
+        if not _is_artifact(path)))
+
+    untracked = hashlib.sha256()
+    for path in untracked_paths:
+        normalized = path.replace("\\", "/")
+        if (normalized.startswith("/") or
+                any(part == ".." for part in normalized.split("/"))):
+            raise GitStateSnapshotError(
+                "unsafe untracked path returned by Git: %s" % path[:300])
+        candidate = root / Path(path)
+        try:
+            mode = candidate.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                kind = b"symlink"
+                content = os.fsencode(os.readlink(candidate))
+            elif stat.S_ISREG(mode):
+                kind = b"file"
+                content = candidate.read_bytes()
+            else:
+                raise GitStateSnapshotError(
+                    "unsupported untracked path type: %s" % path[:300])
+        except GitStateSnapshotError:
+            raise
+        except Exception as exc:
+            raise GitStateSnapshotError(
+                "unable to read untracked path %s: %s" %
+                (path[:300], str(exc)[:500])) from exc
+        _hash_frame(untracked, b"path", os.fsencode(normalized))
+        _hash_frame(untracked, b"kind", kind)
+        _hash_frame(untracked, b"content-sha256",
+                    hashlib.sha256(content).digest())
+
+    state = hashlib.sha256()
+    _hash_frame(state, b"head", head.encode("ascii"))
+    _hash_frame(state, b"cached-paths", cached_paths)
+    _hash_frame(state, b"cached-diff-sha256",
+                hashlib.sha256(cached_diff).digest())
+    _hash_frame(state, b"unstaged-paths", unstaged_paths)
+    _hash_frame(state, b"unstaged-diff-sha256",
+                hashlib.sha256(unstaged_diff).digest())
+    _hash_frame(state, b"untracked-sha256", untracked.digest())
+    clean = not (cached_paths or unstaged_paths or untracked_paths)
+    return GitStateSnapshot(head=head, digest=state.hexdigest(), clean=clean)
 
 
 def diff_fingerprint(worktree: str, base_commit: str) -> str:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -128,9 +129,11 @@ def test_final_gate_tolerates_legacy_baseline_failures(tmp_path):
     gate_red_legacy = MagicMock(ok=False, results=[{
         "command": "pytest", "stdout": "..F..\n_____ test_legacy _____\n",
         "stderr": ""}])
-    with patch.object(IntegrationGate, "run", return_value=gate_red_legacy):
+    with patch.object(IntegrationGate, "run",
+                      return_value=gate_red_legacy) as gate_run:
         r = mc.step()
     assert r["state"] == "MISSION_DONE"
+    assert gate_run.call_args.kwargs["require_clean"] is True
     # the tolerance is recorded in the mission reason
     assert "legacy" in mc._read_state().get("reason", "")
 
@@ -148,6 +151,52 @@ def test_final_gate_new_failure_is_fatal(tmp_path):
     with patch.object(IntegrationGate, "run", return_value=gate_red_new):
         r = mc.step()
     assert r["state"] == "HUMAN"
+
+
+def test_final_gate_initial_dirty_is_human_without_verifier(tmp_path):
+    mc, store, _data_dir = _seed_done_mission(tmp_path)
+    integration = Path(store.path).parent / "integration"
+    (integration / "unexpected.txt").write_text("dirty", encoding="utf-8")
+    verifier = MagicMock(wraps=FakeVerifierProvider())
+    mc.verifier = verifier
+
+    result = mc.step()
+
+    assert result["state"] == "HUMAN"
+    assert "initial repository not clean" in mc._read_state()["reason"]
+    verifier.verify.assert_not_called()
+
+
+def test_final_gate_exit_zero_mutation_is_human_without_verifier(tmp_path):
+    mc, store, _data_dir = _seed_done_mission(tmp_path)
+    mc.mission.gate_commands = [
+        '"%s" -c "from pathlib import Path; '
+        "Path('gate-mutated.txt').write_text('changed')\"" % sys.executable]
+    verifier = MagicMock(wraps=FakeVerifierProvider())
+    mc.verifier = verifier
+
+    result = mc.step()
+
+    assert result["state"] == "HUMAN"
+    assert "Gate changed repository state" in mc._read_state()["reason"]
+    verifier.verify.assert_not_called()
+    assert (Path(store.path).parent / "integration" /
+            "gate-mutated.txt").exists()
+
+
+def test_final_gate_probe_failure_is_human_without_verifier(tmp_path):
+    mc, _store, _data_dir = _seed_done_mission(tmp_path)
+    verifier = MagicMock(wraps=FakeVerifierProvider())
+    mc.verifier = verifier
+
+    with patch(
+            "loopcore.mission_gate.wt.git_state_snapshot",
+            side_effect=wt.GitStateSnapshotError("HEAD unavailable")):
+        result = mc.step()
+
+    assert result["state"] == "HUMAN"
+    assert "pre-Gate Git probe failed" in mc._read_state()["reason"]
+    verifier.verify.assert_not_called()
 
 
 def test_final_verifier_transport_failure_retries_next_tick(tmp_path):
