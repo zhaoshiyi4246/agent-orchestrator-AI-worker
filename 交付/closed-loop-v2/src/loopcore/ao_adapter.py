@@ -21,6 +21,7 @@ import os
 import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
@@ -170,6 +171,12 @@ class AOAdapter:
         data = self._get("/api/v1/projects")
         projects = data.get("projects", data) if isinstance(data, dict) else data
         return list(projects or [])
+
+    def get_project(self, project_id: str) -> Dict:
+        """Return one project's official detail/config representation."""
+        encoded = urllib.parse.quote(str(project_id), safe="")
+        data = self._get("/api/v1/projects/%s" % encoded)
+        return (data or {}).get("project", data or {})
 
     def get_workers(self, project_id: str) -> List[Dict]:
         """List worker sessions of one project."""

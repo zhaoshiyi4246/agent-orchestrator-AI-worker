@@ -40,7 +40,7 @@ def _completed(returncode=0, stdout="", stderr=""):
         returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def _happy_environment(monkeypatch, tmp_path):
+def _happy_environment(monkeypatch, tmp_path, default_branch="main"):
     project = tmp_path / "project"
     project.mkdir()
     run_file = tmp_path / "running.json"
@@ -61,11 +61,19 @@ def _happy_environment(monkeypatch, tmp_path):
 
         def get_projects(self):
             return [{"id": "project-a", "path": str(project),
-                     "name": "Project A", "kind": "git"}]
+                     "name": "Project A", "kind": "single_repo"}]
+
+        def get_project(self, project_id):
+            assert project_id == "project-a"
+            return {"id": project_id, "path": str(project),
+                    "kind": "single_repo",
+                    "defaultBranch": default_branch}
 
     monkeypatch.setattr(run_mission, "AOAdapter", Adapter)
 
     def command(argv, **_kwargs):
+        if argv[1:] == ["remote"]:
+            return _completed(stdout="origin\n")
         if "rev-parse" in argv:
             return _completed(stdout="true\n")
         if "config" in argv:
@@ -76,6 +84,30 @@ def _happy_environment(monkeypatch, tmp_path):
 
     monkeypatch.setattr(run_mission.subprocess, "run", command)
     return project, run_file, executables
+
+
+def _branch_environment(monkeypatch, tmp_path, default_branch, responses):
+    project, run_file, executables = _happy_environment(
+        monkeypatch, tmp_path, default_branch=default_branch)
+    calls = []
+
+    def command(argv, **_kwargs):
+        command_args = tuple(argv[1:])
+        calls.append(command_args)
+        if command_args == ("rev-parse", "--is-inside-work-tree"):
+            return _completed(stdout="true\n")
+        if command_args in (
+                ("config", "--get", "user.name"),
+                ("config", "--get", "user.email")):
+            return _completed(stdout="configured\n")
+        if command_args == ("login", "status"):
+            return _completed(stdout="Logged in using ChatGPT\n")
+        if command_args in responses:
+            return responses[command_args]
+        raise AssertionError("unexpected preflight command: %r" % (argv,))
+
+    monkeypatch.setattr(run_mission.subprocess, "run", command)
+    return project, run_file, executables, calls
 
 
 @pytest.mark.parametrize("implementation,version", [
@@ -187,6 +219,8 @@ def test_preflight_rejects_missing_git_identity(
     _happy_environment(monkeypatch, tmp_path)
 
     def command(argv, **_kwargs):
+        if argv[1:] == ["remote"]:
+            return _completed(stdout="origin\n")
         if "rev-parse" in argv:
             return _completed(stdout="true\n")
         if argv[-1] == missing_key:
@@ -198,6 +232,138 @@ def test_preflight_rejects_missing_git_identity(
     monkeypatch.setattr(run_mission.subprocess, "run", command)
     with pytest.raises(run_mission.PreflightError, match=missing_key):
         run_mission.mission_preflight(MISSION, CFG)
+
+
+def test_preflight_rejects_explicit_local_branch_without_origin(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout=""),
+    }
+    project, *_rest, calls = _branch_environment(
+        monkeypatch, tmp_path, "main", responses)
+    monkeypatch.setattr(run_mission, "ROOT", tmp_path)
+
+    with pytest.raises(
+            run_mission.PreflightError,
+            match="has no origin remote required"):
+        run_mission.mission_preflight(MISSION, CFG)
+
+    assert not (tmp_path / "runtime").exists()
+    assert not any("refs/heads/main" in value
+                   for call in calls for value in call)
+    assert not any(call and call[0] in ("fetch", "ls-remote")
+                   for call in calls)
+    assert project.is_dir()
+
+
+def test_preflight_accepts_explicit_origin_branch(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout="origin\n"),
+        ("rev-parse", "--verify", "--quiet",
+         "refs/remotes/origin/main^{commit}"):
+            _completed(stdout="abc123\n"),
+    }
+    _branch_environment(monkeypatch, tmp_path, "main", responses)
+
+    result = run_mission.mission_preflight(MISSION, CFG)
+
+    assert result["project_path"] == tmp_path / "project"
+
+
+def test_preflight_rejects_missing_explicit_origin_branch(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout="origin\n"),
+        ("rev-parse", "--verify", "--quiet",
+         "refs/remotes/origin/main^{commit}"):
+            _completed(returncode=1),
+    }
+    _branch_environment(monkeypatch, tmp_path, "main", responses)
+
+    with pytest.raises(
+            run_mission.PreflightError,
+            match="remote-backed base refs/remotes/origin/main is unavailable"):
+        run_mission.mission_preflight(MISSION, CFG)
+
+
+def test_preflight_auto_without_remotes_fails_without_branch_fallback(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout=""),
+    }
+    project, *_rest, calls = _branch_environment(
+        monkeypatch, tmp_path, "auto", responses)
+    monkeypatch.setattr(run_mission, "ROOT", tmp_path)
+
+    with pytest.raises(
+            run_mission.PreflightError,
+            match="has no origin remote required"):
+        run_mission.mission_preflight(MISSION, CFG)
+
+    assert not (tmp_path / "runtime").exists()
+    assert not any("refs/heads/main" in value
+                   for call in calls for value in call)
+    assert project.is_dir()
+
+
+def test_preflight_auto_origin_uses_cached_symbolic_head(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout="origin\n"),
+        ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):
+            _completed(stdout="refs/remotes/origin/main\n"),
+        ("rev-parse", "--verify", "--quiet",
+         "refs/remotes/origin/main^{commit}"):
+            _completed(stdout="abc123\n"),
+    }
+    _branch_environment(monkeypatch, tmp_path, "auto", responses)
+
+    assert run_mission.mission_preflight(MISSION, CFG)["project_path"] == \
+        tmp_path / "project"
+
+
+def test_preflight_auto_rejects_missing_origin_head(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout="origin\n"),
+        ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):
+            _completed(returncode=1),
+    }
+    _branch_environment(monkeypatch, tmp_path, "auto", responses)
+
+    with pytest.raises(
+            run_mission.PreflightError,
+            match="refs/remotes/origin/HEAD is unavailable"):
+        run_mission.mission_preflight(MISSION, CFG)
+
+
+def test_preflight_does_not_fallback_to_checked_out_main(
+        monkeypatch, tmp_path):
+    responses = {
+        ("remote",): _completed(stdout=""),
+    }
+    *_values, calls = _branch_environment(
+        monkeypatch, tmp_path, "main", responses)
+
+    with pytest.raises(run_mission.PreflightError):
+        run_mission.mission_preflight(MISSION, CFG)
+
+    assert ("symbolic-ref", "--quiet", "--short", "HEAD") not in calls
+    assert not any("refs/heads/main" in value
+                   for call in calls for value in call)
+
+
+def test_adapter_project_detail_uses_official_endpoint(monkeypatch):
+    adapter = run_mission.AOAdapter()
+    seen = []
+    monkeypatch.setattr(
+        adapter, "_get",
+        lambda path: seen.append(path) or {
+            "project": {"id": "project/a", "defaultBranch": "main"}})
+
+    assert adapter.get_project("project/a")["defaultBranch"] == "main"
+    assert seen == ["/api/v1/projects/project%2Fa"]
 
 
 def test_preflight_rejects_missing_codex(monkeypatch, tmp_path):
@@ -214,6 +380,8 @@ def test_preflight_rejects_non_chatgpt_login(monkeypatch, tmp_path):
     _happy_environment(monkeypatch, tmp_path)
 
     def command(argv, **_kwargs):
+        if argv[1:] == ["remote"]:
+            return _completed(stdout="origin\n")
         if "rev-parse" in argv:
             return _completed(stdout="true\n")
         if "config" in argv:

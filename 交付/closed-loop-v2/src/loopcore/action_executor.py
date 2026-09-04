@@ -9,10 +9,12 @@ auto-merge; deleting branches; modifying TaskSpec/tests; bypassing budgets.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional
 
 from .mission_contracts import (PlannerAction, PlannerActionType, TaskSpec,
@@ -59,6 +61,48 @@ def _is_transient_spawn_error(text: str) -> bool:
     return bool(_TRANSIENT_SPAWN_RE.search(text or ""))
 
 
+_SPAWN_SUMMARY_LIMIT = 1600
+_HUMAN_SPAWN_SUMMARY_LIMIT = 400
+
+
+def _sanitize_spawn_error(text: str) -> str:
+    """Redact credentials, prompts and user-home paths from AO diagnostics."""
+    value = str(text or "")
+    value = _re.sub(
+        r"(?is)(--prompt(?:=|\s+))(.+?)(?=\s+--[a-z][a-z-]*(?:=|\s)|$)",
+        lambda match: match.group(1) + "[REDACTED]", value)
+    value = _re.sub(
+        r"(?i)(authorization\s*:\s*bearer\s+)\S+",
+        lambda match: match.group(1) + "[REDACTED]", value)
+    value = _re.sub(
+        r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}",
+        "Bearer [REDACTED]", value)
+    value = _re.sub(
+        r"(?i)\b([A-Z0-9_]*(?:api[_-]?key|access[_-]?token|"
+        r"refresh[_-]?token)|token|cookie)\b(\s*[:=]\s*)[^\s,;]+",
+        lambda match: match.group(1) + match.group(2) + "[REDACTED]",
+        value)
+    value = _re.sub(
+        r"(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{12,})\b",
+        "[REDACTED]", value)
+    value = _re.sub(
+        r"(?i)(\[\s*request\s+)[^\]]+(\])",
+        lambda match: match.group(1) + "[REDACTED]" + match.group(2),
+        value)
+    home = str(Path.home())
+    for form in {home, home.replace("\\", "/")}:
+        if form:
+            value = _re.sub(_re.escape(form), "[HOME]", value,
+                            flags=_re.IGNORECASE)
+    value = _re.sub(
+        r"(?i)\b[A-Z]:[\\/]Users[\\/][^\\/\s\"'<>]+",
+        "[HOME]", value)
+    value = _re.sub(
+        r"(?i)(?<!\w)/(?:home|Users)/[^/\s\"'<>]+",
+        "[HOME]", value)
+    return " ".join(value.split())
+
+
 class ActionExecutor:
     def __init__(self, ao_bin: str, data_dir: Optional[str],
                  run_file: Optional[str],
@@ -91,6 +135,7 @@ class ActionExecutor:
         self.transient_spawn_backoff_seconds = int(
             transient_spawn_backoff_seconds or 90)
         self._last_spawn_error = ""
+        self._last_spawn_classification = ""
 
     def _spawn_args(self, project_id: str, harness: str, name: str,
                     prompt: str, include_model: bool = True) -> list:
@@ -118,19 +163,35 @@ class ActionExecutor:
             proc = self._run(self._spawn_args(project_id, harness, name,
                                               prompt))
         except Exception as e:  # timeout / transport -> transient
-            self._last_spawn_error = "%s: %s" % (type(e).__name__, e)
+            raw = "%s: %s" % (type(e).__name__, e)
+            self._last_spawn_classification = (
+                "transient" if _is_transient_spawn_error(raw)
+                else "persistent")
+            self._last_spawn_error = _sanitize_spawn_error(
+                raw)[:_SPAWN_SUMMARY_LIMIT]
             return None
         if proc.returncode != 0:
-            self._last_spawn_error = ((proc.stderr or "") + " "
-                                      + (proc.stdout or "")).strip()[:300]
+            raw = ((proc.stderr or "") + "\n" +
+                   (proc.stdout or "")).strip()
+            self._last_spawn_classification = (
+                "transient" if _is_transient_spawn_error(raw)
+                else "persistent")
+            self._last_spawn_error = _sanitize_spawn_error(
+                raw)[:_SPAWN_SUMMARY_LIMIT]
             return None
         import re
         m = re.search(r"spawned session (\S+)", proc.stdout or "")
         if m:
             self._last_spawn_error = ""
+            self._last_spawn_classification = ""
             return m.group(1)
-        self._last_spawn_error = ("rc=0 but no session id in output: "
-                                  + (proc.stdout or ""))[:300]
+        raw = ("rc=0 but no session id in output: " +
+               (proc.stdout or "") + "\n" + (proc.stderr or ""))
+        self._last_spawn_classification = (
+            "transient" if _is_transient_spawn_error(raw)
+            else "persistent")
+        self._last_spawn_error = _sanitize_spawn_error(
+            raw)[:_SPAWN_SUMMARY_LIMIT]
         return None
 
     def load_counters(self, task_id: str) -> None:
@@ -223,11 +284,15 @@ class ActionExecutor:
 
     def spawn_budget_detail(self, task_id: str) -> str:
         """Human-readable budget usage for halt messages / panel display."""
-        return ("persistent %d/%d, transient %d/%d" % (
+        detail = ("persistent %d/%d, transient %d/%d" % (
             self.store.counter_get("spawn_attempts:" + task_id),
             self.max_spawn_attempts,
             self.store.counter_get("spawn_transient:" + task_id),
             self.max_transient_spawn_attempts))
+        if self._last_spawn_error:
+            detail += "; last spawn failure: " + \
+                self._last_spawn_error[:_HUMAN_SPAWN_SUMMARY_LIMIT]
+        return detail
 
     def _spawn_backoff_pending(self, task_id: str) -> bool:
         next_at = self.store.counter_get("spawn_next_at:" + task_id)
@@ -286,12 +351,27 @@ class ActionExecutor:
                         "spawn_next_at:"):
                 self.store.counter_delete_prefix(pfx + task.task_id)
             return sid
-        if _is_transient_spawn_error(self._last_spawn_error):
+        classification = self._last_spawn_classification or (
+            "transient" if _is_transient_spawn_error(self._last_spawn_error)
+            else "persistent")
+        if classification == "transient":
             n = self.store.counter_incr("spawn_transient:" + task.task_id)
             backoff = self.transient_spawn_backoff_seconds * n
         else:
             n = self.store.counter_incr("spawn_attempts:" + task.task_id)
             backoff = self.spawn_backoff_seconds * n
+        summary = self._last_spawn_error or "AO spawn failed without output"
+        fingerprint = hashlib.sha256(
+            summary.encode("utf-8")).hexdigest()[:12]
+        alert_id = "spawn-failure:%s:%s:%d:%s" % (
+            task.task_id, classification, n, fingerprint)
+        self.store.record_alert(alert_id, {
+            "alert_type": "SPAWN_FAILURE",
+            "task_id": task.task_id,
+            "classification": classification,
+            "attempt": n,
+            "summary": summary,
+        })
         self.store.counter_set("spawn_next_at:" + task.task_id,
                                _epoch_seconds() + backoff)
         return None

@@ -119,6 +119,56 @@ def _run_preflight_command(argv: list[str], *, cwd: Path | None = None):
         raise PreflightError("command probe failed: %s" % argv[0]) from exc
 
 
+_AO_ORIGIN_REQUIRED = (
+    "AO Project has no origin remote required by the validated AO 0.12.9 "
+    "workspace contract."
+)
+
+
+def _workspace_ref_error(ref: str) -> PreflightError:
+    display_ref = ref if len(ref) <= 160 else ref[:157] + "..."
+    return PreflightError(
+        "AO Project is not workspace-ready for AO 0.12.9: remote-backed "
+        "base %s is unavailable. Fetch/configure origin before running "
+        "CLAO." % display_ref)
+
+
+def _validate_project_default_branch(
+        git_bin: str, project_path: Path, project_detail: dict) -> str:
+    """Validate AO 0.12.9's observed remote-backed workspace contract."""
+    configured = str(project_detail.get("defaultBranch") or "auto").strip()
+    remote_result = _run_preflight_command(
+        [git_bin, "remote"], cwd=project_path)
+    if remote_result.returncode != 0:
+        raise PreflightError(_AO_ORIGIN_REQUIRED)
+    remotes = [line.strip() for line in remote_result.stdout.splitlines()
+               if line.strip()]
+    if "origin" not in remotes:
+        raise PreflightError(_AO_ORIGIN_REQUIRED)
+
+    if configured.lower() == "auto":
+        origin_head = "refs/remotes/origin/HEAD"
+        symbolic = _run_preflight_command(
+            [git_bin, "symbolic-ref", "--quiet", origin_head],
+            cwd=project_path)
+        target_ref = symbolic.stdout.strip() if symbolic.returncode == 0 \
+            else ""
+        prefix = "refs/remotes/origin/"
+        if not target_ref.startswith(prefix) or target_ref == origin_head:
+            raise _workspace_ref_error(origin_head)
+        branch = target_ref[len(prefix):]
+    else:
+        branch = configured
+        target_ref = "refs/remotes/origin/" + branch
+
+    exists = _run_preflight_command(
+        [git_bin, "rev-parse", "--verify", "--quiet",
+         target_ref + "^{commit}"], cwd=project_path)
+    if exists.returncode != 0:
+        raise _workspace_ref_error(target_ref)
+    return branch
+
+
 def mission_preflight(mission_dict: dict, cfg: dict) -> dict:
     """Validate shared CLI/Panel Mission prerequisites before runtime state.
 
@@ -168,6 +218,11 @@ def mission_preflight(mission_dict: dict, cfg: dict) -> dict:
     project_path = Path(project_text) if project_text else None
     if project_path is None or not project_path.is_dir():
         raise PreflightError("AO Project path is unavailable: %s" % project_id)
+    try:
+        project_detail = adapter.get_project(project_id)
+    except Exception as exc:
+        raise PreflightError("AO Project detail is unavailable: %s"
+                             % project_id) from exc
 
     worktree = _run_preflight_command(
         [git_bin, "rev-parse", "--is-inside-work-tree"], cwd=project_path)
@@ -178,6 +233,8 @@ def mission_preflight(mission_dict: dict, cfg: dict) -> dict:
             [git_bin, "config", "--get", key], cwd=project_path)
         if identity.returncode != 0 or not identity.stdout.strip():
             raise PreflightError("Git identity is missing: %s" % key)
+    _validate_project_default_branch(
+        git_bin, project_path, project_detail)
 
     codex_bin = shutil.which("codex")
     if not codex_bin:
