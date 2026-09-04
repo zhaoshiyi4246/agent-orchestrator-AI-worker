@@ -105,7 +105,9 @@ closed-loop-demo/             演示目标仓库
 closed-loop-demo-origin.git/  演示 bare origin
 ```
 
-R2 完成调用关系证明前，不删除历史来源目录或旧兼容模块。
+R2 Closure Audit 已确认当前 v2 不依赖历史来源目录。它们继续保留在 Git repo 作为
+historical/reference source，但不应进入最终 competition release artifact；精确的
+clean release 内容边界归 R5 审计。
 
 ## AO 运行时与用户交付边界
 
@@ -127,7 +129,7 @@ bootstrap/安装脚本和 AO 首次配置 UX 仍未完成；Panel 已能选择 A
 Project，但 Project 创建、注册和修改仍由 AO 负责。当前交付不能宣称为通用安装包
 或解压即用产品。
 
-## 当前已实现与后续事项
+## 当前实现与阶段事项
 
 当前已实现：
 
@@ -142,23 +144,23 @@ Project，但 Project 创建、注册和修改仍由 AO 负责。当前交付不
 - StateStore 恢复、stop/resume；
 - UI 时间线与派生的 Markdown/JSONL。
 
-仍待后续：
+阶段状态与后续：
 
 - Verifier final-only 已完成，PR #11 后同题 E2E 为 `646.116s`；
 - gate-first happy path 与 event-freshness 修复已完成；
 - 默认 1 个 Worker、按需最多 2 个已完成；标准 smoke
   `MISSION-E2E-SMOKE-20260902-204459` 已到达 `MISSION_DONE`；
 - Competition runtime 的自动 master/main merge 与 origin push 已移除；
-- 比赛行为收敛后再做重复模块和旧入口清理；
+- R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 单一；
 - 最后完成 clean delivery、installer/bootstrap、AO first-run 和 CI 收尾；
 - fingerprint/source 与 thread revision 继续保持低优先级。
 
 Project selector 已完成；Project 注册本身仍由 AO 负责，其他首次配置 UX 继续归
 后续任务。历史 Mission 查看/resume 保留已持久化的 `project_id`；CLI 仍通过
 Mission JSON 显式提供 `project_id`。若未来需要主分支交付，用户显式 SCM 操作也应
-作为独立设计处理。`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常生产消费者；遗留
-`AO_DATA_DIR` 兼容模块仍归 R2 引用审计。clean clone 安装归最终 clean-delivery
-阶段。
+作为独立设计处理。legacy `AO_DATA_DIR` parallel runtime 已在 R2 收敛；当前
+runtime 只使用正式 portable AO boundary。clean artifact、dependency bootstrap、
+preflight 与 clean-machine first-run 归 R5。
 
 ## 本地验证
 

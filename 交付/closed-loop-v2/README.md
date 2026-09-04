@@ -85,9 +85,10 @@ Mission ID，不得删除旧 `runtime` 来伪装成新 Mission。
   CL-AO 只读发现并选择已注册项目。历史 Mission 查看/resume 保留其持久化的
   `project_id`，不受当前 selector 值影响；`run_mission.py` CLI 仍通过 Mission JSON
   显式提供 `project_id`，不增加 selector 语义。
-- AO 路径和安装尚未完全可移植，不能视为解压即用产品。
-- Competition runtime 不提供自动 push；`CLAO_AO_DATA_DIR` 已无当前 v0.2 正常
-  生产消费者，遗留 `AO_DATA_DIR` 兼容模块留待 R2 引用审计。
+- AO runtime discovery/path contract 已完成可移植化，legacy `AO_DATA_DIR` parallel
+  runtime 已在 R2 收敛。当前仍不是解压即用产品，因为 dependency bootstrap、
+  preflight 和 clean-machine first-run 尚待 R5 完成。
+- Competition runtime 不提供自动 push。
 
 ## 验证
 
