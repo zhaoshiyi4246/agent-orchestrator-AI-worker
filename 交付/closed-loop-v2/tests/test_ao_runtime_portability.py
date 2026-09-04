@@ -190,6 +190,11 @@ def test_build_runtime_resolves_one_shared_ao_contract(monkeypatch, tmp_path):
 
     monkeypatch.setattr(run_mission, "resolve_ao_bin", resolve_bin)
     monkeypatch.setattr(run_mission, "resolve_ao_run_file", resolve_run_file)
+    monkeypatch.setattr(
+        run_mission, "mission_preflight",
+        lambda *_args, **_kwargs: {
+            "ao_bin": resolve_bin(), "ao_run_file": resolve_run_file(),
+            "project_path": tmp_path})
     monkeypatch.setattr(run_mission, "MissionRuntime", DummyRuntime)
     monkeypatch.delenv("AO_DATA_DIR", raising=False)
 
@@ -228,7 +233,9 @@ def test_read_only_attach_skips_ao_but_normal_start_fails_fast(
     monkeypatch.setattr(server, "ROOT", tmp_path)
     monkeypatch.setattr(run_mission, "ROOT", tmp_path)
     monkeypatch.setattr(run_mission, "load_config", lambda: cfg)
-    monkeypatch.setattr(run_mission.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        run_mission.shutil, "which",
+        lambda name: "git.exe" if name == "git" else None)
     monkeypatch.delenv("CLAO_AO_BIN", raising=False)
     monkeypatch.delenv("AO_RUN_FILE", raising=False)
     panel = server.PanelState()

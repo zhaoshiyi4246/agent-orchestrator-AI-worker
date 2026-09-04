@@ -301,6 +301,12 @@ def test_build_runtime_uses_codex_planner_and_config_model(monkeypatch,
                         lambda: str(tmp_path / "ao.exe"))
     monkeypatch.setattr(run_mission, "resolve_ao_run_file",
                         lambda: tmp_path / "running.json")
+    monkeypatch.setattr(
+        run_mission, "mission_preflight",
+        lambda *_args, **_kwargs: {
+            "ao_bin": str(tmp_path / "ao.exe"),
+            "ao_run_file": tmp_path / "running.json",
+            "project_path": tmp_path})
     monkeypatch.setattr(run_mission, "StateStore", DummyStore)
     monkeypatch.setattr(run_mission, "AOAdapter", DummyAdapter)
     monkeypatch.setattr(run_mission, "ActionExecutor", dummy_executor)

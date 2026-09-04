@@ -453,14 +453,6 @@ class Handler(BaseHTTPRequestHandler):
         project_id = str(body.get("project_id") or "").strip()
         if not project_id:
             raise RuntimeError("project_id is required")
-        projects = _load_ao_projects()
-        project = next((item for item in projects
-                        if str(item.get("id")) == project_id), None)
-        if project is None:
-            raise RuntimeError("AO project not found: " + project_id)
-        project_path = str(project.get("path") or "").strip()
-        if not project_path or not Path(project_path).is_dir():
-            raise RuntimeError("AO project path unavailable: " + project_id)
 
         objective = (body.get("objective") or "").strip()
         if not objective:

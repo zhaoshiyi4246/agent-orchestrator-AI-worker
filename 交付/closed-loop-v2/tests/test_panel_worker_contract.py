@@ -193,51 +193,23 @@ def test_panel_requires_project_id_before_project_discovery(
     start.assert_not_called()
 
 
-def test_panel_rejects_unknown_project_id(monkeypatch, tmp_path):
-    start = MagicMock()
-    project_path = tmp_path / "registered-project"
-    project_path.mkdir()
-    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
-    monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
-    monkeypatch.setattr(panel_server, "_load_ao_projects", lambda: [{
-        "id": "project-a", "name": "Project A", "path": str(project_path),
-        "kind": "git",
-    }])
+def test_panel_normal_start_uses_shared_runtime_preflight(
+        monkeypatch, tmp_path):
+    panel = panel_server.PanelState()
+    monkeypatch.setattr(panel_server.run_mission, "setup_environment",
+                        lambda **_kwargs: None)
+    monkeypatch.setattr(panel_server.run_mission, "load_config", lambda: {})
+    build = MagicMock(side_effect=panel_server.run_mission.PreflightError(
+        "AO Project is not registered: unknown"))
+    monkeypatch.setattr(panel_server.run_mission, "build_runtime", build)
 
-    with pytest.raises(RuntimeError, match="AO project not found: unknown"):
-        panel_server.Handler._start_mission(
-            object(), _valid_mission_body("unknown"))
+    with pytest.raises(panel_server.run_mission.PreflightError,
+                       match="not registered"):
+        panel.start_mission({"mission_id": "M-PANEL", "project_id": "unknown"})
 
-    start.assert_not_called()
-
-
-@pytest.mark.parametrize("path_kind", ["empty", "missing", "file"])
-def test_panel_rejects_unavailable_project_path_before_runtime(
-        monkeypatch, tmp_path, path_kind):
-    start = MagicMock()
-    if path_kind == "empty":
-        project_path = ""
-    elif path_kind == "missing":
-        project_path = str(tmp_path / "missing-project")
-    else:
-        path = tmp_path / "not-a-directory"
-        path.write_text("file", encoding="utf-8")
-        project_path = str(path)
-    monkeypatch.setattr(panel_server, "ROOT", tmp_path)
-    monkeypatch.setattr(panel_server.PANEL, "start_mission", start)
-    monkeypatch.setattr(panel_server, "_load_ao_projects", lambda: [{
-        "id": "project-a", "name": "Project A", "path": project_path,
-        "kind": "git",
-    }])
-
-    with pytest.raises(
-            RuntimeError,
-            match="AO project path unavailable: project-a"):
-        panel_server.Handler._start_mission(
-            object(), _valid_mission_body())
-
-    start.assert_not_called()
-    assert not (tmp_path / "tasks").exists()
+    build.assert_called_once()
+    assert panel.rt is None
+    assert panel.thread is None
 
 
 @pytest.mark.parametrize("value", [1, 2])
