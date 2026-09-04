@@ -83,7 +83,7 @@ try {
         throw "The virtual environment failed Python 3.12/PyYAML/pytest verification."
     }
 
-    Write-Host "Bootstrap complete. The Panel can now be started with 启动面板.bat."
+    Write-Host "Bootstrap complete. Start CLAO with 启动CLAO.bat."
     exit 0
 }
 catch {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""closed-loop-v2 one-command mission runner.
+"""CLAO v0.2 one-command Mission runner.
 
-Usage (from the closed-loop-v2 directory):
+Usage (from the CLAO product directory):
     PYTHONPATH=src .venv/Scripts/python.exe run_mission.py tasks/mission-quick.json
     ... add --dry-run to preflight Planner decomposition without touching AO.
 

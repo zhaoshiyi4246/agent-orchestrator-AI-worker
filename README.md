@@ -11,7 +11,7 @@ Project、Session、Conversation、Agent Runtime、worktree 和 PR/SCM 能力；
 ## 首次安装
 
 Windows 用户需预先安装 CPython 3.12.x。进入 `交付/closed-loop-v2/` 后可直接
-双击 `启动面板.bat`；启动器会在需要时运行 `bootstrap.ps1`，创建本地 `.venv`
+双击 `启动CLAO.bat`；启动器会在需要时运行 `bootstrap.ps1`，创建本地 `.venv`
 并安装精确固定的 Python 依赖。也可以手动执行：
 
 ```powershell

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>闭环智能体控制台 · CL-AO Panel</title>
+<title>CLAO · Closed-Loop Agent Orchestrator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -84,7 +84,7 @@
 </head>
 <body>
 <header>
-  <h1>🌀 闭环智能体控制台</h1>
+  <h1>🌀 CLAO · Closed-Loop Agent Orchestrator</h1>
   <span class="dot" id="runDot"></span>
   <span class="badge" id="missionState">空闲</span>
   <span id="elapsed" style="color:var(--dim);font-size:12px"></span>
@@ -185,7 +185,7 @@ tests/**</textarea>
         <g class="node" id="n-auditor"><circle cx="125" cy="252" r="22" fill="#9e6a03"/><text x="125" y="256" text-anchor="middle" fill="#fff">Auditor</text><text class="sub" x="125" y="282" text-anchor="middle">只读审计</text></g>
         <g class="node" id="n-verifier"><circle cx="635" cy="262" r="24" fill="#1a7f37"/><text x="635" y="266" text-anchor="middle" fill="#fff">Verifier</text><text class="sub" x="635" y="294" text-anchor="middle">独立复核</text></g>
         <g class="node" id="n-gate"><circle cx="565" cy="165" r="22" fill="#0b6e7a"/><text x="565" y="169" text-anchor="middle" fill="#fff">Gate</text><text class="sub" x="565" y="193" text-anchor="middle">确定性程序</text></g>
-        <g class="node" id="n-store"><rect x="320" y="210" width="120" height="50" rx="10" fill="#1f6feb"/><text x="380" y="232" text-anchor="middle" fill="#fff">StateStore</text><text class="sub" x="380" y="249" text-anchor="middle">唯一 CL-AO 状态源</text></g>
+        <g class="node" id="n-store"><rect x="320" y="210" width="120" height="50" rx="10" fill="#1f6feb"/><text x="380" y="232" text-anchor="middle" fill="#fff">StateStore</text><text class="sub" x="380" y="249" text-anchor="middle">唯一 CLAO 状态源</text></g>
         <g class="node" id="n-ao"><rect x="320" y="330" width="120" height="50" rx="10" fill="#b54708"/><text x="380" y="352" text-anchor="middle" fill="#fff">AO</text><text class="sub" x="380" y="369" text-anchor="middle">Session / worktree</text></g>
         <g class="node" id="n-timeline"><rect x="540" y="375" width="180" height="48" rx="10" fill="#30363d"/><text x="630" y="397" text-anchor="middle">Event Projection</text><text class="sub" x="630" y="414" text-anchor="middle">Timeline / JSONL / Markdown</text></g>
         <g class="node" id="n-worker-lane"><rect x="120" y="370" width="180" height="82" rx="12" fill="#21262d" stroke="#b54708"/><text class="sub" x="210" y="388" text-anchor="middle">Worker 1..N · AO Codex</text></g>

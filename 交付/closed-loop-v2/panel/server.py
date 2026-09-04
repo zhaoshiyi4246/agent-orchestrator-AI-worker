@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""closed-loop-v2 web panel — zero-dependency local UI for the closed loop.
+"""CLAO web panel — zero-dependency UI for Closed-Loop Agent Orchestrator.
 
-Double-click 启动面板.bat (or run this file with the venv python) and the
+Double-click 启动CLAO.bat (or run this file with the venv python) and the
 browser opens on the panel. The panel drives the EXACT runner code path the
 CLI uses (run_mission.build_runtime); all state is read from the mission's
 SQLite store, so the panel never modifies kernel behavior.
