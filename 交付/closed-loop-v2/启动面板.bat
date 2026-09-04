@@ -3,7 +3,7 @@ rem 闭环智能体控制台 — 双击启动，自动准备 Python 环境并打
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" goto bootstrap
-".venv\Scripts\python.exe" -c "import sys,yaml; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)"
+".venv\Scripts\python.exe" -c "import platform,sys,yaml; raise SystemExit(0 if platform.python_implementation() == 'CPython' and sys.version_info[:2] == (3, 12) else 1)"
 if errorlevel 1 goto bootstrap
 goto start_panel
 

@@ -20,7 +20,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -44,6 +46,13 @@ from loopcore.mission_gate import IntegrationGate            # noqa: E402
 from loopcore.planner_adapter import CodexCliPlannerProvider       # noqa: E402
 from loopcore.state_store import StateStore                  # noqa: E402
 from loopcore.verifier import CodexCliVerifierProvider       # noqa: E402
+
+
+SAMPLE_PROJECT_PLACEHOLDER = "REPLACE_WITH_AO_PROJECT_ID"
+
+
+class PreflightError(RuntimeError):
+    """A bounded, user-actionable Mission environment failure."""
 
 
 def resolve_ao_bin(*, environ=None, which=None) -> str:
@@ -98,6 +107,103 @@ def setup_environment(*, ao_run_file: Path | str | None = None) -> None:
 def load_config() -> dict:
     return yaml.safe_load(
         (ROOT / "config" / "default.yaml").read_text("utf-8"))
+
+
+def _run_preflight_command(argv: list[str], *, cwd: Path | None = None):
+    """Run one read-only capability probe without a shell."""
+    try:
+        return subprocess.run(
+            argv, cwd=str(cwd) if cwd is not None else None,
+            capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PreflightError("command probe failed: %s" % argv[0]) from exc
+
+
+def mission_preflight(mission_dict: dict, cfg: dict) -> dict:
+    """Validate shared CLI/Panel Mission prerequisites before runtime state.
+
+    This is deliberately capability-based and read-only: it never installs
+    tools, writes Git configuration, creates runtime state, or calls a model.
+    """
+    if platform.python_implementation() != "CPython" \
+            or sys.version_info[:2] != (3, 12):
+        raise PreflightError("CPython 3.12.x is required")
+
+    git_bin = shutil.which("git")
+    if not git_bin:
+        raise PreflightError("Git executable not found on PATH")
+
+    project_id = str(mission_dict.get("project_id") or "").strip()
+    if project_id == SAMPLE_PROJECT_PLACEHOLDER:
+        raise PreflightError(
+            "replace sample project_id with a registered AO Project id")
+    if not project_id:
+        raise PreflightError("mission project_id is required")
+
+    try:
+        ao_bin = resolve_ao_bin()
+    except RuntimeError as exc:
+        raise PreflightError(str(exc)) from exc
+    ao_run_file = resolve_ao_run_file()
+    if not ao_run_file.is_file():
+        raise PreflightError(
+            "AO daemon runfile not found: set CLAO_AO_RUN_FILE or start AO")
+
+    ao_cfg = cfg.get("ao") or {}
+    adapter = AOAdapter(
+        base_url=ao_cfg.get("base_url") or "http://127.0.0.1:3001",
+        timeout=float(ao_cfg.get("request_timeout_seconds", 15)),
+        run_file=ao_run_file)
+    try:
+        projects = adapter.get_projects()
+    except Exception as exc:
+        raise PreflightError("AO daemon/API unavailable") from exc
+    project = next(
+        (item for item in projects
+         if isinstance(item, dict) and str(item.get("id")) == project_id),
+        None)
+    if project is None:
+        raise PreflightError("AO Project is not registered: %s" % project_id)
+    project_text = str(project.get("path") or "").strip()
+    project_path = Path(project_text) if project_text else None
+    if project_path is None or not project_path.is_dir():
+        raise PreflightError("AO Project path is unavailable: %s" % project_id)
+
+    worktree = _run_preflight_command(
+        [git_bin, "rev-parse", "--is-inside-work-tree"], cwd=project_path)
+    if worktree.returncode != 0 or worktree.stdout.strip().lower() != "true":
+        raise PreflightError("selected AO Project path is not a Git worktree")
+    for key in ("user.name", "user.email"):
+        identity = _run_preflight_command(
+            [git_bin, "config", "--get", key], cwd=project_path)
+        if identity.returncode != 0 or not identity.stdout.strip():
+            raise PreflightError("Git identity is missing: %s" % key)
+
+    codex_bin = shutil.which("codex")
+    if not codex_bin:
+        raise PreflightError("Codex CLI executable not found on PATH")
+    login = _run_preflight_command([codex_bin, "login", "status"])
+    login_text = "%s\n%s" % (login.stdout or "", login.stderr or "")
+    if login.returncode != 0 or "chatgpt" not in login_text.lower():
+        raise PreflightError("Codex CLI is not logged in with ChatGPT")
+
+    roles = cfg.get("roles") or {}
+    required_models = {
+        "roles.planner.model": ((roles.get("planner") or {}).get("model")),
+        "roles.auditor.model": ((roles.get("auditor") or {}).get("model")),
+        "roles.verifier.model": ((roles.get("verifier") or {}).get("model")),
+        "worker.model": ((cfg.get("worker") or {}).get("model")),
+    }
+    missing = [name for name, value in required_models.items()
+               if not str(value or "").strip()]
+    if missing:
+        raise PreflightError("model configuration is missing: %s" % missing[0])
+
+    return {
+        "ao_bin": ao_bin,
+        "ao_run_file": ao_run_file,
+        "project_path": project_path,
+    }
 
 
 def build_planner(cfg: dict, *, timeout: int = 180,
@@ -202,8 +308,13 @@ def build_runtime(mission_dict: dict, cfg: dict, *, dry_run: bool = False,
     if not require_ao and not dry_run:
         raise ValueError(
             "require_ao=False is only valid for read-only inspection")
-    ao_bin = resolve_ao_bin() if require_ao else "ao-unavailable-read-only"
-    ao_run_file = resolve_ao_run_file()
+    if require_ao:
+        checked = mission_preflight(mission_dict, cfg)
+        ao_bin = checked["ao_bin"]
+        ao_run_file = checked["ao_run_file"]
+    else:
+        ao_bin = "ao-unavailable-read-only"
+        ao_run_file = resolve_ao_run_file()
     setup_environment(ao_run_file=ao_run_file if require_ao else None)
     return MissionRuntime(
         mission_dict, cfg, ao_bin=ao_bin, ao_run_file=ao_run_file,
@@ -326,7 +437,12 @@ def main() -> int:
             return 2
 
     setup_environment()
-    rt = build_runtime(mission_dict, cfg, dry_run=False)
+    try:
+        rt = build_runtime(mission_dict, cfg, dry_run=False)
+    except PreflightError as exc:
+        detail = str(exc).replace("\r", " ").replace("\n", " ")[:400]
+        print("preflight failed: %s" % detail, file=sys.stderr)
+        return 2
 
     print(f"[runner] mission={rt.mission.mission_id} "
           f"project={rt.mission.project_id} dry_run={args.dry_run} "
