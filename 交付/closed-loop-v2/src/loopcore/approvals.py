@@ -25,7 +25,7 @@ from typing import Any, Protocol
 
 
 class ApprovalClient(Protocol):
-    """The two AO calls the approver needs (AOClient satisfies this)."""
+    """Structural protocol for AO conversation and approval operations."""
 
     def get_conversation(self, session_id: str, **kwargs: Any) -> dict: ...
 

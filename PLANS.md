@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R2 duplicate / legacy convergence
-- 当前任务：R2-1 Protocol Retirement — remove obsolete AO Chat wire contract
-- 当前状态：Protocol Retirement Audit 已通过；删除无 production/test caller 的 legacy v2 `protocol.py`，不增加 compatibility shim，保留 `clao-src` 独立历史副本；完整离线 387 项、compileall 与 diff-check 均通过
-- 下一步：进入 AO Client / old Observer island audit；不在 protocol retirement 中处理旧 Client、Observer 或 Gate
+- 当前任务：R2-1 AOClient / old Observer Island Retirement
+- 当前状态：AOClient / old Observer Island Audit PASS；删除无 current production/test/public-contract caller 的 legacy v2 `ao_client.py` 与 `observer.py`，不迁移旧 snapshot/trigger，不增加 compatibility shim；定向 48 项与完整离线 387 项均通过，compileall 与 diff-check 退出 0
+- 下一步：进入旧 `integration_gate.py` 独立 retirement audit
 
 ## 一、更新规则
 
@@ -30,9 +30,9 @@
 |---|---|---|
 | R0 | 修正基线、治理文件、真实入口与测试基线 | 已完成 |
 | R1 | Codex Provider 迁移、架构事实、文档、代码注释与前端拓扑统一 | 已完成 |
-| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；Batch 1/2A/2B 与 protocol retirement 小批次收敛） |
+| R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 进行中（R2-0 已完成；Batch 1/2A/2B、protocol 与 AOClient/old Observer island 已收敛） |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
-| R4 | 配置有效性、项目选择和高风险功能收敛 | 进行中（Project selector） |
+| R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
 | R5 | CI、全新安装、真实 Demo 与干净交付 | 未开始 |
 
 ## 三、R0 验收条件
@@ -435,7 +435,8 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 `python -m pytest tests -q` 为 `390 passed in 67.60s`；
 `python -m compileall -q src panel run_mission.py`、`git diff --check` 均退出 0；
 6 份指定文档的本地 Markdown 链接检查共检查 3 个链接，missing 为 0。本任务按
-要求未运行真实 AO Worker/GUI E2E。
+要求未运行真实 AO Worker/GUI E2E。后续真实 AO/Panel Project selector GUI smoke
+已 PASS，R4 Project selector 因此在阶段总览中标记为已完成。
 
 ## 十、已知问题清单
 
@@ -443,7 +444,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 |---|---|---|---|
 | K1 | 旧架构文档与代码主路径不一致 | R1 | 已解决：当前 README、交付说明、架构文档、PROJECT 和前端均与真实主路径一致 |
 | K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
-| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 部分收敛：v2 三套 legacy CLI 与旧 AO Chat protocol 已退休；旧 Client/Observer/Gate 继续分批审计 |
+| K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | 部分收敛：v2 三套 legacy CLI、旧 AO Chat protocol 与 AOClient/old Observer island 已退休；旧 `integration_gate.py` 进入下一独立审计 |
 | K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2 | 已确认：三者同时交付；主路径无跨目录 import，来源目录当前仅作参考 |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已解决：新 Mission 默认 1；值为 1 时确定性单 lane 且不调用 decomposition Planner；显式选择 2 时 Planner 可返回 1 或 2 |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
@@ -483,7 +484,7 @@ workspace API PR 中以 AO 官方 loopback endpoint 取代 Worker workspace 内�
 推导。Competition behavior 主路径和 Project selector 完成后，当前工作已切回
 duplicate / legacy convergence。删除前仍必须有测试和入口证据。
 
-#### R2-1 Reference Graph Audit、Batch 1、Batch 2A、Batch 2B 与 Protocol Retirement
+#### R2-1 Reference Graph Audit、Batch 1、Batch 2A、Batch 2B、Protocol 与 AOClient/old Observer Island Retirement
 
 Reference Graph Audit 已完成并确认 `llm_env.py` 从 `run_mission.py`、
 `panel/server.py` 与 Controller production roots 不可达；生产 Planner、Auditor、
@@ -530,6 +531,17 @@ docstring 中的 `AuditRequest` 是明确 deferred legacy hit，留待旧 Gate �
 完整离线测试为 `387 passed in 72.99s`；compileall 与 `git diff --check` 均退出
 0。下一步进入 AO Client / old Observer island audit。
 
+AOClient / old Observer Island Audit 已审计 PASS：legacy v2
+`src/loopcore/ao_client.py` 与 `src/loopcore/observer.py` 仅形成互相连接的 leaf
+island，无 current production caller、current tests 或 current public contract。本批
+删除两个 source；不迁移 `check_health`、httpx client、strict workspace snapshot、
+message-revision progress、`REPEATED_FAILURE`、`MILESTONE` 或 `STALL`，也不增加
+compatibility shim。当前 AO 读写继续分别由 `AOAdapter` 与 `ActionExecutor` 负责，
+当前确定性告警继续由 `event_observer.Observer` 负责；`clao-src` 与
+`ao-supervision-sidecar` 的历史副本和测试不修改。下一步独立审计旧
+`integration_gate.py`。当前边界相关定向回归为 `48 passed in 22.65s`，完整离线
+基线为 `387 passed in 120.29s`；compileall 与 `git diff --check` 均退出 0。
+
 ### R3
 
 完整 E2E 后优先做 Competition behavior convergence：
@@ -575,7 +587,8 @@ event freshness、默认单 Worker、自动 SCM 副作用移除与 R4 Project se
 完成；核心 single-worker 标准 smoke 已通过。当前 R2 Batch 2A 仅退休两个损坏的
 legacy Mission/ClosedLoop CLI，Batch 2B 继续退休 legacy supervision CLI；两批均不
 运行 AO Worker、Codex live、Mission 或 E2E。Protocol retirement 继续删除无 caller
-的旧 AO Chat wire contract。下一步进入 AO Client / old Observer island audit；
+的旧 AO Chat wire contract，AOClient / old Observer island retirement 删除无 caller
+的旧 Client/Observer 组合。下一步进入旧 `integration_gate.py` 独立 retirement audit；
 其余配置/高风险边界、重复模块清理与 clean delivery/
 installer/first-run 继续分批推进。
 
