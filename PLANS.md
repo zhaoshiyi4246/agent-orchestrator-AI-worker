@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
 - 当前阶段：R5 clean delivery / first-run
-- 当前任务：R5-4.5 CLAO Product Layout / Branding
-- 当前状态：PR #27 已完成 AO 0.12.9 remote-backed Project preflight 与持久化、脱敏的 spawn failure diagnostics；开发仓库保留历史 source layout，release builder 将当前产品映射为 ZIP 中唯一顶层目录 `clao/`。
-- 下一步：Final R5-5 Live Rehearsal
+- 当前任务：R5-5 standalone Codex Provider non-Git cwd transport fix
+- 当前状态：首次 standalone Final CLI 的 Worker、Task Gate、integration 与 Final Gate 均 PASS；Mission Verifier 因 CLAO artifact 根目录不是 Git repository 被 Codex CLI 拒绝。共享 structured Codex transport 已加入 `--skip-git-repo-check`，Provider cwd 保持不变。
+- 下一步：修复 PR 审计合并后重新运行 Final CLI
 
 ## 一、更新规则
 
@@ -654,6 +654,13 @@ R5-4.5 CLAO Product Layout 保留开发仓库中的 `交付/`、治理文档和�
 `交付/release-manifest.txt` 的 source-to-destination mapping 只把当前产品映射到 ZIP
 唯一顶层目录 `clao/`。产品名称固定为 CLAO v0.2，开发审计文档不进入 release；
 下一步为 Final R5-5 Live Rehearsal。
+
+首次从 standalone CLAO ZIP 运行 Final CLI 时，AO Worker、Task Gate、integration 与
+Final Gate 均 PASS；Mission Verifier 在 transport startup 阶段因 CLAO artifact 根目录
+不是 Git repository 被 Codex CLI 拒绝。Planner/Auditor/Verifier 仍保持现有 cwd 语义，
+共享 `run_codex_json()` 固定加入 `--skip-git-repo-check`，不要求 standalone 产品目录
+携带 `.git`。repo 外 non-Git cwd 的真实 structured Codex smoke 已返回
+`R5_CODEX_NONGIT_OK`；下一步在本修复 PR 审计并合并后重新运行 Final CLI。
 
 ## 十二、停止条件
 
