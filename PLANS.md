@@ -1,9 +1,9 @@
 # v0.2 修正计划
 
-- 当前阶段：R5 clean delivery / first-run
-- 当前任务：R5-5 standalone Codex Provider non-Git cwd transport fix
-- 当前状态：首次 standalone Final CLI 的 Worker、Task Gate、integration 与 Final Gate 均 PASS；Mission Verifier 因 CLAO artifact 根目录不是 Git repository 被 Codex CLI 拒绝。共享 structured Codex transport 已加入 `--skip-git-repo-check`，Provider cwd 保持不变。
-- 下一步：修复 PR 审计合并后重新运行 Final CLI
+- 当前阶段：R5 complete
+- 当前任务：R5-5 Final Closeout Evidence
+- 当前状态：R5 COMPLETE；clean release、Final CLI live 与人工 GUI live 均已 PASS，目标仓库 main/origin 未被自动写回或 push。
+- 下一步：Final Release Closeout Build
 
 ## 一、更新规则
 
@@ -33,7 +33,7 @@
 | R2 | AO 主路径可移植性；重复模块、旧入口和参考代码收敛 | 已完成 |
 | R3 | Competition behavior convergence：Worker、Verifier、自动 SCM 边界；issue/thread 低优先级 | 主要 competition 路径已完成；低优先级治理项保留 |
 | R4 | 配置有效性、项目选择和高风险功能收敛 | 已完成（Project selector；GUI smoke PASS） |
-| R5 | CI、全新安装、真实 Demo 与干净交付 | 进行中（R5-4.5 CLAO product layout；final live 未完成） |
+| R5 | CI、全新安装、真实 Demo 与干净交付 | 已完成（Final CLI/GUI live PASS） |
 
 ## 三、R0 验收条件
 
@@ -445,7 +445,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 | K1 | 旧架构文档与代码主路径不一致 | R1 | 已解决：当前 README、交付说明、架构文档、PROJECT 和前端均与真实主路径一致 |
 | K2 | Loop Bus 文档职责与 Bus Projector 实际职责不一致 | R1 | 已解决：当前文档和 UI 明确 Bus 是 Store 后置事件投影，不是控制或 AO 指令路径 |
 | K3 | 多套 AO Client、Observer、Gate、协议与 CLI | R2 | RESOLVED：三套 legacy CLI、旧 AO Chat protocol、AOClient/old Observer island 与旧 `integration_gate.py` 均已退休；当前 v2 只保留正式边界 |
-| K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2/R5 | SOURCE_BOUNDARY_RESOLVED：主路径无跨目录 import，历史来源目录仅作参考；PACKAGE_BOUNDARY_DEFERRED_TO_R5：最终 competition release artifact 的内容边界由 R5 审计决定 |
+| K4 | `clao-src`、sidecar 与主产品同时交付，边界不清 | R2/R5 | RESOLVED：source boundary 与 package boundary 均已收敛；allowlist release 只生成顶层 `clao/` 产品，历史来源不进入 artifact |
 | K5 | 默认强制拆成至少两个 Worker | R3 | 已解决：新 Mission 默认 1；值为 1 时确定性单 lane 且不调用 decomposition Planner；显式选择 2 时 Planner 可返回 1 或 2 |
 | K6 | Verifier 使用过重且旧文档允许绕过 Planner | R3 | 第一阶段已解决：新 Task Gate PASS 直接 DONE，Task Verifier 默认调用为 0；历史 `VERIFIER_PENDING` 可恢复，Mission Final Verifier 仍调用 1 次；高风险子任务显式按需策略未新增 |
 | K7 | issue fingerprint 包含 source | R3 | 已确认：`issue_fingerprint()` 返回值显式包含 `source` |
@@ -458,7 +458,7 @@ payload，不查询或应用当前 selector；CLI 继续通过 Mission JSON 显�
 | K15 | 当前 Planner/Auditor/Verifier 与 `llm_env` 绑定 Claude CLI、`ANTHROPIC_MODEL` 和 `GLM-5.2` | R1 | 已解决：三个生产 Provider 均复用 Codex CLI，生产组装不再调用 `ensure_llm_env()`，默认模型均为可配置的 `gpt-5.6-sol` |
 | K16 | 当前 Worker 默认 `worker_harness=claude-code`、`worker.model=GLM-5.2` | R1 | 已解决：Panel/CLI、MissionSpec、TaskSpec、schema、初始与 REPLAN spawn 均为 `codex`，生产 model 为显式 `gpt-5.6-sol`，raw AO 与 ActionExecutor smoke 均通过 |
 | K17 | 旧 README、`ARCHITECTURE-v0.2.md` 和 `default.yaml` 明确写有“不使用 Codex”或 Claude/GLM 依赖 | R1 | 已解决：当前生产配置、README、架构说明和前端均统一为 Codex 契约；兼容/历史字符串明确不属于生产路径 |
-| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | 主生产运行路径、Panel Project 选择与 R5-2 clean-machine Python bootstrap 已解决；AO executable、runfile、Worker workspace 已移除开发者绝对路径/内部 layout 推导，legacy `AO_DATA_DIR` parallel runtime 已收敛。仍未解决：AO/Codex/Git Mission preflight、clean artifact builder 与 AO 首次配置 UX；Project 注册仍由 AO 负责；不得宣称为通用安装包 |
+| K18 | 主生产路径和用户交付可移植性 | R2-0/比赛 UX/R4/R5 | RESOLVED：portable AO boundary、Project selector、Python bootstrap、shared Mission preflight、clean artifact builder 与 standalone artifact CLI/GUI live 均已验证；Project 注册仍按产品契约由外部 AO 负责 |
 
 ## 十一、阶段边界
 
@@ -660,7 +660,31 @@ Final Gate 均 PASS；Mission Verifier 在 transport startup 阶段因 CLAO arti
 不是 Git repository 被 Codex CLI 拒绝。Planner/Auditor/Verifier 仍保持现有 cwd 语义，
 共享 `run_codex_json()` 固定加入 `--skip-git-repo-check`，不要求 standalone 产品目录
 携带 `.git`。repo 外 non-Git cwd 的真实 structured Codex smoke 已返回
-`R5_CODEX_NONGIT_OK`；下一步在本修复 PR 审计并合并后重新运行 Final CLI。
+`R5_CODEX_NONGIT_OK`；该修复随后经审计合并，并进入 Final CLI 重跑。
+
+R5-5 Final Live Acceptance 已 PASS。最终 live-tested product source commit 为
+`6bbc499b9603bba55542989a595ae888e6f7c4f3`；测试 ZIP 为
+`clao-v0.2-6bbc499b9603.zip`，SHA-256 为
+`af4277b9db3277eb75fd57bde386d031f787ff972a374426ea9d3a12d9a008c8`。
+artifact 使用自身 bootstrap 环境完成 `438 passed` 与 compileall；独立
+`SHA256SUMS.txt` 校验 92/92 PASS。
+
+CLI Mission `MISSION-R5-FINAL-CLI-20260905-101005` 到达 `MISSION_DONE`：只创建
+1 个 AO Codex Worker，model=`gpt-5.6-sol`，Task Gate、Final Gate 与 Mission
+Verifier 均 PASS；Task Verifier、decomposition Planner、Completion Auditor、
+Completion Planner 调用均为 0，`LOOP_ERROR` 与 trusted-directory error 均为 0。
+
+GUI Mission `MISSION-PANEL-20260905-103636` 已由用户完成人工 GUI 确认并到达
+`MISSION_DONE`。Project selector、Timeline、Task Gate evidence、Final Gate evidence
+与 Mission Verifier verdict 均 PASS，Panel errors 为 0；GUI Worker
+`r5-final-20260905-100602-134-2` 已终止。Worker 期间一次可恢复 reconnect alert
+没有触发 Auditor/Planner fallback，不影响最终 PASS。
+
+一次性目标仓库的 main 与 origin/main 均保持 baseline
+`8959433f5bb6558a70f4ff783fe617525fc4b6d4`，没有 automatic main/master
+writeback 或 automatic push。验收后 Panel 已停止，临时 AO Project 已通过官方命令
+移除，一次性 Git repo、bare origin、解压副本与 builder 输出已完成安全清理。
+R5 最终状态为 `R5 COMPLETE`；下一步只执行 Final Release Closeout Build。
 
 ## 十二、停止条件
 
