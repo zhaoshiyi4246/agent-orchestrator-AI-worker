@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder、R5-4 clean release rehearsal 与 PR #27 AO 0.12.9 workspace preflight/spawn diagnostics 已完成；当前实施 R5-4.5 CLAO Product Layout，下一步重新运行 R5-5 final live rehearsal
+- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder、R5-4 clean release rehearsal、PR #27 AO workspace preflight 与 R5-4.5 CLAO Product Layout 已完成；当前修复 R5-5 standalone artifact 中 structured Codex Provider 的 non-Git cwd transport，下一步重新运行 Final CLI
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -186,8 +186,10 @@ AO 边界、Observer、Gate 和 Store，并直接负责恢复、派发、合并�
   创建 `MissionRuntime`、`StateStore`、runtime 目录、AOAdapter、Auditor、
   Verifier、Worker、Gate 或 LoopBus，不连接 AO，也不修改用户项目。
 
-共享 Codex runner 是 Planner/Auditor/Verifier 的统一复用边界。它不持久化
-Codex Session、不读取 API Key、不设置 `ANTHROPIC_MODEL`，也不在共享层重试。
+共享 Codex runner 是 Planner/Auditor/Verifier 的统一复用边界。它固定使用
+`--skip-git-repo-check`，因此 standalone CLAO 产品目录不需要自身成为 Git repository；
+Provider 的 cwd 语义保持不变。runner 不持久化 Codex Session、不读取 API Key、不设置
+`ANTHROPIC_MODEL`，也不在共享层重试。
 Auditor/Verifier 对 `CodexCliError` transport failure 立即向 Controller 抛出；
 完整 JSON 的 schema/local-validator failure 可在角色 Provider 内重试一次，第二次
 仍无效则作为 provider protocol error 抛出。两类运行错误都不得构造 Auditor
@@ -675,9 +677,12 @@ ZIP，并只使用第二个全新目录中的 ZIP 解压内容完成两次 boots
 测试、compileall、deterministic dry-run、Panel offline import、独立 SHA256SUMS、
 Markdown link 与 hygiene 验证；没有调用真实 AO/Codex。初次 R5-5 已暴露 AO Git
 Project workspace readiness blocker；remote-backed 本地 bare origin 的 raw spawn
-随后已 PASS，但完整 CLI Mission 与 GUI 彩排仍未执行。PR #27 已完成 remote-backed
-Project preflight 与脱敏 spawn diagnostics；当前 R5-4.5 保留开发仓库 source layout，
-通过 release mapping 构建顶层 `clao/` 产品。下一步重新运行 R5-5；本轮不改变现有
+随后已 PASS。PR #27 已完成 remote-backed Project preflight 与脱敏 spawn diagnostics；
+R5-4.5 保留开发仓库 source layout，通过 release mapping 构建顶层 `clao/` 产品。
+首次 standalone Final CLI 中 Worker、Task Gate、integration 与 Final Gate 均 PASS，
+但 Mission Verifier 因 artifact 根目录不是 Git cwd 被 Codex CLI 拒绝。共享 structured
+Codex transport 已加入 `--skip-git-repo-check`，并由真实 non-Git cwd structured smoke
+验证；下一步在本修复审计并合并后重新运行 Final CLI。本轮不改变 Provider cwd、
 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
 
 ## 十、明确非目标

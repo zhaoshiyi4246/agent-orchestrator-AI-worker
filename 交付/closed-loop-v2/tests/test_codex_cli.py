@@ -50,6 +50,7 @@ def test_success_uses_safe_command_stdin_and_cleans_output(monkeypatch,
     assert result == {"ok": True}
     command = seen["command"]
     assert command[0:2] == ["codex-test-bin", "exec"]
+    assert "--skip-git-repo-check" in command
     assert "--ephemeral" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert command[command.index("--model") + 1] == "model-x"
@@ -64,6 +65,43 @@ def test_success_uses_safe_command_stdin_and_cleans_output(monkeypatch,
     assert seen["kwargs"]["cwd"] == str(tmp_path.resolve())
     assert not Path(seen["output_path"]).exists()
     assert not Path(seen["schema_path"]).exists()
+
+
+def test_standalone_non_git_cwd_uses_skip_repo_check(monkeypatch, tmp_path):
+    standalone = tmp_path / "standalone-clao"
+    standalone.mkdir()
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        schema_path = Path(
+            command[command.index("--output-schema") + 1])
+        seen["schema"] = json.loads(schema_path.read_text(encoding="utf-8"))
+        output_path = Path(
+            command[command.index("--output-last-message") + 1])
+        output_path.write_text('{"answer":"ok"}', encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = run_codex_json(
+        "standalone prompt", _schema(tmp_path),
+        codex_bin="codex-test-bin", cwd=standalone)
+
+    command = seen["command"]
+    assert not (standalone / ".git").exists()
+    assert result == {"answer": "ok"}
+    assert "--skip-git-repo-check" in command
+    assert "--ephemeral" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert command[-1] == "-"
+    assert "standalone prompt" not in command
+    assert seen["kwargs"]["input"] == "standalone prompt"
+    assert seen["kwargs"]["shell"] is False
+    assert seen["kwargs"]["cwd"] == str(standalone.resolve())
+    assert Path(command[command.index("--output-schema") + 1]).name == \
+        "schema.json"
+    assert "--output-last-message" in command
 
 
 def test_planner_transport_schema_preserves_replan_objective(monkeypatch,

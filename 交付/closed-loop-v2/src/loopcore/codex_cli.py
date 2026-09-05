@@ -76,6 +76,7 @@ def run_codex_json(
         command = [
             executable,
             "exec",
+            "--skip-git-repo-check",
             "--ephemeral",
             "--sandbox", "read-only",
             "--model", model,
