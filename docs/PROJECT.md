@@ -1,6 +1,6 @@
 # v0.2 修正项目基线
 
-- 状态：R2 duplicate / legacy convergence 已关闭，当前 v2 production authority 已收敛为单一 AO/Observer/Gate/Contract/CLI 边界；R3 已移除正常运行路径的自动 master/main 写回与 origin push；R4 Project selector 已完成；R5-2 bootstrap、R5-3 shared preflight/allowlist builder、R5-4 clean release rehearsal、PR #27 AO workspace preflight 与 R5-4.5 CLAO Product Layout 已完成；当前修复 R5-5 standalone artifact 中 structured Codex Provider 的 non-Git cwd transport，下一步重新运行 Final CLI
+- 状态：CLAO v0.2 architecture implementation 与 clean release 已完成；Final CLI live 与人工 GUI live 均 PASS，R5 已关闭；下一步 Final Release Closeout Build 只处理 packaging/provenance，不增加架构功能
 - 权威性：本文件是修正期间的当前架构基线
 - 原则：如无必要，勿增实体
 
@@ -660,10 +660,9 @@ UI → 绕过 MissionController 改状态
   push 已从 competition runtime 移除；
   fingerprint/thread revision 保持低优先级；
 - R4：Project selector 已完成；其余继续收敛配置和高风险功能；
-- R5：进行中；boundary audit、Python bootstrap、shared preflight、clean release
-  rehearsal 与 PR #27 AO 0.12.9 workspace preflight/spawn diagnostics 已完成；当前
-  R5-4.5 以 source-to-destination manifest 生成顶层 `clao/` 产品布局，下一步重新执行
-  final R5-5 live rehearsal。
+- R5：已完成；boundary audit、Python bootstrap、shared preflight、clean release、
+  AO 0.12.9 workspace preflight/spawn diagnostics、CLAO Product Layout 与 Final
+  CLI/GUI live acceptance 均已 PASS。
 
 核心 single-worker 标准 smoke 已通过，Competition runtime 的自动 SCM 副作用与
 R4 Project selector 已完成。R2 Closure Audit 已 PASS，duplicate / legacy
@@ -682,8 +681,25 @@ R5-4.5 保留开发仓库 source layout，通过 release mapping 构建顶层 `c
 首次 standalone Final CLI 中 Worker、Task Gate、integration 与 Final Gate 均 PASS，
 但 Mission Verifier 因 artifact 根目录不是 Git cwd 被 Codex CLI 拒绝。共享 structured
 Codex transport 已加入 `--skip-git-repo-check`，并由真实 non-Git cwd structured smoke
-验证；下一步在本修复审计并合并后重新运行 Final CLI。本轮不改变 Provider cwd、
+验证；该修复随后经审计合并，并进入 Final CLI 重跑。本轮不改变 Provider cwd、
 Auditor/Planner、retry、alert/L0 或 Mission final 验证语义。
+
+R5-5 最终重跑使用 source commit
+`6bbc499b9603bba55542989a595ae888e6f7c4f3` 构建
+`clao-v0.2-6bbc499b9603.zip`；ZIP SHA-256 为
+`af4277b9db3277eb75fd57bde386d031f787ff972a374426ea9d3a12d9a008c8`。
+artifact 自身 bootstrap 后 `438 passed`、compileall PASS，92 条 SHA256SUMS
+独立校验全部通过。
+
+CLI Mission `MISSION-R5-FINAL-CLI-20260905-101005` 与人工 GUI Mission
+`MISSION-PANEL-20260905-103636` 均到达 `MISSION_DONE`。两条路径均使用默认单个
+AO Codex Worker 与 `gpt-5.6-sol`，Task Gate、Final Gate、Mission Verifier 均
+PASS；GUI 的 Project selector、Timeline 与 Gate/Verifier evidence 已人工确认，
+Panel errors 为 0。一次可恢复 reconnect alert 没有触发 Auditor/Planner fallback。
+目标 main/origin 均保持原 baseline，没有 automatic main/master writeback 或 push。
+
+因此 CLAO v0.2 architecture implementation、clean release 与 R5 均已关闭。
+Final Release Closeout Build 只负责 packaging/provenance，不改变产品架构或行为。
 
 ## 十、明确非目标
 
